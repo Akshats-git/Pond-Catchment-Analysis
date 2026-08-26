@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Environments
+.venv/
+venv/
+env/
+
+# Numeric caches / generated artefacts
+*.npy
+*.npz
+docs/figures/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+references/
