@@ -250,6 +250,34 @@ class HydrologyConfig:
     applied to the annual total as a single event it returns 92%, a ~6x overestimate
     (PLAN §4)."""
 
+    kirpich_min_slope: float = 1e-4
+    """Floor on the flow-path slope fed to Kirpich. A path a contour-derived DEM reports
+    as level is an artefact of the 1 m interval, not a horizontal channel; the floor keeps
+    Tc finite and errs long, which is the safe direction when sizing a spillway."""
+
+    natural_storage_floor_m3: float = 50.0
+    """Below this, a site is treated as having no natural depression and its capacity is
+    excavated or bunded instead. Two cells of a 5 m grid holding 1 m of water is 50 m^3 --
+    less than that is the priority-flood epsilon and interpolation noise, not a pond
+    (PLAN §11 / Phase 7)."""
+
+    spill_area_jump_factor: float = 3.0
+    """A step of the stage-storage curve that multiplies the water surface by more than
+    this has topped a divide: the pond stops being a pond and spreads across whatever lies
+    beyond. The stage below that step is reported as the site's usable pond, since the
+    exact sill elevation is only known to the contour interval. On the sample's best site
+    the surface goes from 0.6 ha to 29.2 ha in the last 25 cm."""
+
+    water_spread_warn_fraction: float = 0.10
+    """Warn when the water surface at the target depth covers more than this fraction of
+    the catchment that feeds it. Such a structure is a reservoir, not a village pond: it
+    floods the ground it is meant to serve."""
+
+    fill_ratio_bands: tuple[float, float, float] = (0.8, 1.2, 3.0)
+    """Cut-points for the plain-English verdict on annual runoff / capacity: below 0.8 the
+    pond does not fill in an average year, below 1.2 it just fills, below 3.0 it fills
+    comfortably, above that it fills early and spills."""
+
     default_target_depth_m: float = 3.0
     """Excavated pond depth. Sites on a channel have no natural depression storage, so
     capacity is computed from this depth against the local terrain (PLAN §11 / Phase 7)."""
