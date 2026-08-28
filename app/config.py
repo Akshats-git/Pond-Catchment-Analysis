@@ -198,6 +198,12 @@ class SitingConfig:
     """No site within this distance of the edge of valid data -- its catchment and its
     embankment would both be partly unmapped."""
 
+    relative_elevation_radius_spacing_multiple: float = 3.0
+    """Radius of the window a site's relative elevation is measured against, in mean
+    contour spacings (~37 m on the sample). Wide enough to span the channel and both of
+    its banks, narrow enough that the answer describes this hollow rather than the
+    valley it sits in."""
+
     default_top_n: int = 3
     max_top_n: int = 10
     """Number of ranked sites returned."""
