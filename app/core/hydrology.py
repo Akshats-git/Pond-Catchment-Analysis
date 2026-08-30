@@ -270,6 +270,10 @@ class StageStorage:
     """Surface area at capacity as a fraction of the catchment. A pond that covers a
     large share of the ground that feeds it is a reservoir, and is flagged as one."""
 
+    pond_mask: np.ndarray
+    """(ny, nx) bool -- the water surface of the pond at its usable stage, which is what
+    Phase 8 draws as the pond footprint."""
+
     spill_stage_index: int | None
     """Index of the stage at which the water first tops a divide and spreads -- the step
     where the surface area jumps by more than `spill_area_jump_factor`. None when the pond
@@ -411,6 +415,11 @@ def stage_storage(
             spill_index = step - 1
             break
 
+    # The pond itself: the pool at the stage the site can actually hold, recomputed once
+    # rather than keeping every stage's mask alive through the loop.
+    pond_stage = stages[-1 if spill_index is None else spill_index]
+    pond = _pool_at(bed, mask, datum + pond_stage, outlet)
+
     depression_volume = float((hollow_water * row_areas).sum())
     excavated = depression_volume <= cfg.natural_storage_floor_m3
 
@@ -459,6 +468,7 @@ def stage_storage(
         frustum_estimate_m3=frustum,
         frustum_error=(frustum - capacity) / capacity if capacity else 0.0,
         water_spread_fraction=spread,
+        pond_mask=pond,
         spill_stage_index=spill_index,
         is_reservoir=spread > cfg.water_spread_warn_fraction,
         warnings=tuple(warnings),

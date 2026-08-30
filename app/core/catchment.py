@@ -179,6 +179,10 @@ class Catchment:
     """Distance from the hydraulically most remote cell to the outlet, along the flow
     path -- the `L` in Phase 7's time of concentration."""
 
+    flow_path_cell: int
+    """Flat index of that most remote cell. Phase 8 walks the receivers down from it to
+    draw the flow path; keeping the cell here means the traversal is not repeated."""
+
     flow_path_relief_m: float
     """Elevation of that most remote cell, minus the outlet's.
 
@@ -333,6 +337,7 @@ class CatchmentDelineator:
             is_lower_bound=contact > self.config.edge_contact_warn_fraction,
             relief_m=float(np.nanmax(self.dem.z[mask]) - outlet_z),
             longest_flow_path_m=path_length,
+            flow_path_cell=int(remote_cell),
             flow_path_relief_m=float(self.dem.z.ravel()[remote_cell] - outlet_z),
             accumulation_cells=float(self.flow.accumulation[row, col]),
             resolution_m=self.dem.resolution_m,
