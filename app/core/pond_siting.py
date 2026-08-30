@@ -340,6 +340,20 @@ class PondSiteSelector:
             warnings=tuple(warnings),
         )
 
+    def site_at(self, lon: float, lat: float, *, rank: int = 1) -> PondSite:
+        """Score one caller-supplied pour point, bypassing the ranking entirely.
+
+        Phase 9 lets a planner name a place they have already chosen. The point still
+        snaps to the routed channel -- a catchment delineated from a cell beside the
+        stream is the hillside, not the basin -- and the site reports how far it moved,
+        so the answer never silently describes somewhere else.
+
+        Raises `ValueError` when the point lies off the mapped area or has no valid data
+        within the snap radius; the caller turns that into a structured response.
+        """
+        catchment = self.delineator.delineate(lon, lat)
+        return self._build_site(rank, *catchment.outlet_rc, catchment)
+
     # ------------------------------------------------------------------ #
     def _suppression_mask(self, row: int, col: int, catchment: Catchment) -> np.ndarray:
         """Ground this pick takes out of the pool (step 4).

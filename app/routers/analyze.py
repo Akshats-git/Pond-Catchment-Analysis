@@ -1,0 +1,271 @@
+"""The HTTP surface: read the request, run the pipeline, map the failures.
+
+No analysis happens here. The route's whole job is the boundary -- turn a multipart body
+into an `AnalysisParams`, hand it to `app.pipeline.analyse`, and turn whatever comes back
+(an answer or one of the core modules' structured errors) into a status code.
+
+**Error mapping is a table, not a chain of `except`s.** Every core module raises the same
+`(code, detail, hint)` triple, and `_STATUS_BY_CODE` says what each code means over HTTP.
+A new failure mode in `app/core/` therefore needs one line here, and until it gets one it
+falls back to `400` -- an unrecognised code means the request could not be analysed, which
+is the honest default. The three groups:
+
+* **400** -- the file cannot yield an answer: unparseable XML, no contour lines, no
+  resolvable elevations, degenerate geometry.
+* **413** -- too much data: over the upload limit, or a sheet that needs more cells than
+  the service will allocate even at its coarsest grid.
+* **422** -- the request was understood but cannot be fulfilled as asked: a parameter out
+  of range, a pour point off the sheet, or a sheet on which the siting rules find no
+  candidate at all. The last of those is not a malformed request, but it is the same
+  thing to a client: nothing about the file changes, and only a different ask can help.
+
+**The analysis runs in a worker thread.** It is several seconds of numpy with the GIL
+held in places, and blocking the event loop would stall every other request including
+`/health`. `anyio.fail_after` bounds how long a client waits; it cannot interrupt numpy
+mid-array, so the thread finishes on its own -- the timeout is a promise to the caller,
+not a kill switch, and it is documented as such rather than overstated.
+"""
+
+from __future__ import annotations
+
+import anyio
+from fastapi import APIRouter, File, Form, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
+from pydantic import ValidationError
+
+from app.config import settings
+from app.core.dem_builder import DEMBuildError
+from app.core.geojson import GeoJSONError
+from app.core.hydrology import HydrologyError
+from app.core.kml_parser import ContourParseError
+from app.core.pond_siting import SitingError
+from app.errors import APIError
+from app.pipeline import AnalysisError, analyse
+from app.schemas.requests import AnalysisParams
+from app.schemas.responses import AnalysisResponse, ErrorResponse, analysis_response
+
+__all__ = ["router"]
+
+router = APIRouter(tags=["analysis"])
+
+_ACCEPTED_SUFFIXES = (".kml", ".kmz")
+
+_STATUS_BY_CODE: dict[str, int] = {
+    # 413 -- more data than the service will take on.
+    "file_too_large": status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+    "sheet_too_large": status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+    # 422 -- the ask, not the file.
+    "invalid_resolution": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "curve_number_out_of_range": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "bad_target_depth": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "bad_rainfall_series": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "invalid_parameters": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "pour_point_outside_map": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "pour_point_unusable": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "no_stream_network": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "no_buildable_ground": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "no_site_found": status.HTTP_422_UNPROCESSABLE_ENTITY,
+}
+"""Codes that are not 400. Everything else the core raises is a file that cannot be
+analysed, which is what 400 means here."""
+
+_ANALYSIS_ERRORS = (
+    ContourParseError,
+    DEMBuildError,
+    SitingError,
+    HydrologyError,
+    GeoJSONError,
+    AnalysisError,
+)
+"""Every structured error the pipeline can raise. They share the `(code, detail, hint)`
+shape by construction, not by coincidence -- see each module's error class."""
+
+_RESPONSES: dict[int | str, dict] = {
+    400: {"model": ErrorResponse, "description": "The file cannot be analysed."},
+    413: {"model": ErrorResponse, "description": "Upload or sheet too large."},
+    422: {"model": ErrorResponse, "description": "Parameters or pour point unusable."},
+    504: {"model": ErrorResponse, "description": "The analysis exceeded the time limit."},
+}
+
+
+async def _read_upload(file: UploadFile) -> bytes:
+    """Read the body, stopping as soon as it passes the limit.
+
+    Starlette has already spooled the upload to a temp file by the time the route runs,
+    so this cannot refuse the transfer -- what it refuses is materialising an oversized
+    file as one `bytes` object and handing it to the parser. Chunked, so an upload ten
+    times the limit costs one chunk of memory rather than ten times the limit.
+    """
+    limit = settings.parser.max_upload_bytes
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(1 << 20)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise APIError(
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                "file_too_large",
+                f"The upload exceeds the {limit / 1e6:.0f} MB limit.",
+                "Clip the contour sheet to the area of interest and retry.",
+            )
+        chunks.append(chunk)
+    if total == 0:
+        raise APIError(
+            status.HTTP_400_BAD_REQUEST,
+            "empty_upload",
+            "The uploaded file is empty.",
+            "Attach a .kml or .kmz contour sheet as the `file` field.",
+        )
+    return b"".join(chunks)
+
+
+def _params(raw: dict) -> AnalysisParams:
+    """Validate the form fields, letting omitted ones fall back to their config default.
+
+    Only the keys the client actually sent are passed on: a `None` would override the
+    default rather than defer to it.
+    """
+    try:
+        return AnalysisParams(**{k: v for k, v in raw.items() if v is not None})
+    except ValidationError as exc:
+        # Pydantic prefixes every custom message with "Value error, ". The sentence
+        # underneath it is written to be read by whoever sent the request, so the
+        # framework's label is dropped rather than passed on.
+        problems = "; ".join(
+            f"{'.'.join(str(p) for p in error['loc']) or 'request'}: "
+            f"{error['msg'].removeprefix('Value error, ')}"
+            for error in exc.errors()
+        )
+        raise APIError(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "invalid_parameters",
+            problems,
+            "See /docs for each parameter's accepted range.",
+        ) from exc
+
+
+def _extension_warning(filename: str) -> str | None:
+    """The parser sniffs the content and does not care about the name, so an odd suffix
+    is worth saying rather than worth refusing."""
+    if filename.lower().endswith(_ACCEPTED_SUFFIXES):
+        return None
+    return (
+        f"{filename!r} is not named .kml or .kmz; it was parsed by content. Check that "
+        "the right file was uploaded."
+    )
+
+
+@router.post(
+    "/analyzeContour",
+    response_model=AnalysisResponse,
+    responses=_RESPONSES,
+    summary="Analyse a contour map and recommend a pond site with its catchment",
+)
+async def analyze_contour(
+    file: UploadFile = File(
+        ..., description="Contour map as .kml or .kmz. Lines, not point labels."
+    ),
+    grid_resolution: float | None = Form(
+        None, description="DEM cell size in metres. Omit to derive it from the contours."
+    ),
+    top_n: int | None = Form(None, description="How many independent basins to return."),
+    lat: float | None = Form(None, description="Explicit pour point latitude."),
+    lon: float | None = Form(None, description="Explicit pour point longitude."),
+    curve_number: float | None = Form(None, description="SCS curve number."),
+    rainfall_mm: float | None = Form(None, description="Annual rainfall in millimetres."),
+    rain_days: int | None = Form(None, description="Days that rain falls on."),
+    target_depth_m: float | None = Form(None, description="Pond depth in metres."),
+    ensemble: bool | None = Form(
+        None, description="Cross-check each site on three grids. Slower, and honest."
+    ),
+) -> AnalysisResponse:
+    """Upload a contour map; get back where the pond goes, what drains to it, and how
+    much water that is worth in an average year.
+
+    The catchment is delineated by D8 steepest descent on a DEM interpolated from the
+    contours, and -- unless `ensemble=false` -- cross-checked on three further grids so
+    the area comes with an error bar rather than a false precision. Siting is
+    catchment-first: the largest independent basins on buildable, low-slope ground.
+    Runoff is SCS-CN applied per rain day and summed, never to the annual total as one
+    storm, which overstates the yield about sixfold.
+
+    Pass `lat` and `lon` together to analyse a site you have already chosen instead.
+    """
+    params = _params(
+        {
+            "grid_resolution": grid_resolution,
+            "top_n": top_n,
+            "lat": lat,
+            "lon": lon,
+            "curve_number": curve_number,
+            "rainfall_mm": rainfall_mm,
+            "rain_days": rain_days,
+            "target_depth_m": target_depth_m,
+            "ensemble": ensemble,
+        }
+    )
+    filename = file.filename or "upload.kml"
+    data = await _read_upload(file)
+
+    try:
+        with anyio.fail_after(settings.api.request_timeout_s):
+            result = await run_in_threadpool(analyse, data, filename, params)
+    except TimeoutError as exc:
+        raise APIError(
+            status.HTTP_504_GATEWAY_TIMEOUT,
+            "analysis_timeout",
+            f"The analysis did not finish within {settings.api.request_timeout_s:.0f} s.",
+            "Request a coarser grid_resolution, or set ensemble=false.",
+        ) from exc
+    except _ANALYSIS_ERRORS as exc:
+        raise APIError(
+            _STATUS_BY_CODE.get(exc.code, status.HTTP_400_BAD_REQUEST),
+            exc.code,
+            exc.detail,
+            exc.hint,
+        ) from exc
+
+    response = analysis_response(result)
+    extension = _extension_warning(filename)
+    if extension is not None:
+        response.warnings.insert(0, extension)
+    return response
+
+
+@router.post(
+    "/findCatchment",
+    response_model=AnalysisResponse,
+    responses=_RESPONSES,
+    summary="Alias of /analyzeContour",
+    include_in_schema=False,
+)
+async def find_catchment(
+    file: UploadFile = File(...),
+    grid_resolution: float | None = Form(None),
+    top_n: int | None = Form(None),
+    lat: float | None = Form(None),
+    lon: float | None = Form(None),
+    curve_number: float | None = Form(None),
+    rainfall_mm: float | None = Form(None),
+    rain_days: int | None = Form(None),
+    target_depth_m: float | None = Form(None),
+    ensemble: bool | None = Form(None),
+) -> AnalysisResponse:
+    """The name the assignment brief uses. Same request, same response, one
+    implementation -- hidden from the schema so `/docs` documents one endpoint rather
+    than two identical ones."""
+    return await analyze_contour(
+        file=file,
+        grid_resolution=grid_resolution,
+        top_n=top_n,
+        lat=lat,
+        lon=lon,
+        curve_number=curve_number,
+        rainfall_mm=rainfall_mm,
+        rain_days=rain_days,
+        target_depth_m=target_depth_m,
+        ensemble=ensemble,
+    )

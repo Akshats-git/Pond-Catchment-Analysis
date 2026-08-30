@@ -27,7 +27,7 @@ independent sub-basins.
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload           # (from Phase 9)
+uvicorn app.main:app --reload
 ```
 
 Interactive API documentation at `http://localhost:8000/docs`.
@@ -36,13 +36,21 @@ Interactive API documentation at `http://localhost:8000/docs`.
 curl -F file=@data/contours_1m.kml http://localhost:8000/api/v1/analyzeContour
 ```
 
+`POST /api/v1/analyzeContour` (alias `findCatchment`) takes the contour file plus optional
+`grid_resolution`, `top_n`, `lat`/`lon`, `curve_number`, `rainfall_mm`, `rain_days`,
+`target_depth_m` and `ensemble`. It returns the recommended site, its catchment with an
+error bar, the stage-storage curve, the annual runoff, and a GeoJSON `FeatureCollection`
+that loads straight into geojson.io. Errors always come back as
+`{"status": "error", "code", "detail", "hint"}`.
+
 ## Layout
 
 | Path | What lives there |
 |---|---|
 | `app/core/` | The analysis: parsing, projection, DEM, flow routing, catchment, siting, hydrology |
+| `app/pipeline.py` | Wires the stages together — the only orchestration point |
 | `app/providers/` | Swappable data sources (rainfall, elevation) — the Phase 3 seam |
-| `app/routers/` | HTTP surface only: validation and orchestration |
+| `app/routers/` | HTTP surface only: validation and error mapping |
 | `app/config.py` | Every tunable, documented and environment-overridable |
 | `tests/` | Analytic validation, mass balance, structural variants |
 | `data/` | `contours_1m.kml`, the provided sample sheet |
@@ -52,5 +60,5 @@ curl -F file=@data/contours_1m.kml http://localhost:8000/api/v1/analyzeContour
 
 Under construction, one commit per phase (see PLAN.md §7).
 
-- [x] Phase 0 — scaffold
-- [ ] Phases 1–12
+- [x] Phases 0–9 — scaffold through the API route
+- [ ] Phases 10–12 — demo page, deployment, report
