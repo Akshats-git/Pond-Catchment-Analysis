@@ -30,7 +30,9 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-Interactive API documentation at `http://localhost:8000/docs`.
+Then open `http://localhost:8000` for the demo page — drop the sample map on it and the
+catchment is drawn over satellite imagery. Interactive API documentation is at
+`http://localhost:8000/docs`.
 
 ```bash
 curl -F file=@data/contours_1m.kml http://localhost:8000/api/v1/analyzeContour
@@ -53,6 +55,7 @@ that loads straight into geojson.io. Errors always come back as
 | `app/routers/` | HTTP surface only: validation and error mapping |
 | `app/config.py` | Every tunable, documented and environment-overridable |
 | `tests/` | Analytic validation, mass balance, structural variants |
+| `static/` | `index.html`, the demo page — one file, no build step, no CDN |
 | `data/` | `contours_1m.kml`, the provided sample sheet |
 | `docs/` | API reference and methodology |
 
@@ -60,5 +63,5 @@ that loads straight into geojson.io. Errors always come back as
 
 Under construction, one commit per phase (see PLAN.md §7).
 
-- [x] Phases 0–9 — scaffold through the API route
-- [ ] Phases 10–12 — demo page, deployment, report
+- [x] Phases 0–10 — scaffold through the demo page
+- [ ] Phases 11–12 — deployment, report

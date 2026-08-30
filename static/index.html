@@ -1,0 +1,1096 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pond Catchment Analysis</title>
+<!--
+  Phase 10 -- the demo page.
+
+  One file, no build step, no CDN: the map is drawn here rather than pulled from a
+  library, so the page works from a `file://` URL, behind a proxy that blocks unpkg, and
+  on a free-tier container with nothing installed. The only network calls it makes are to
+  this service and to the tile servers it credits at the bottom of the map.
+
+  The renderer is a plain slippy map: Web Mercator tiles positioned by one CSS transform,
+  and the API's GeoJSON re-projected into an SVG overlay in screen coordinates on every
+  frame. Screen-space rather than a scaled group, because a scaled group scales stroke
+  widths and marker radii with it, and a 400 ha catchment at zoom 18 would draw a 40 px
+  outline over the ground it is meant to show.
+
+  Feature colours are read from the simplestyle properties the API already emits
+  (`stroke`, `fill`, `fill-opacity`, `marker-color`), so the page and geojson.io draw the
+  same picture, and there is one place -- app/core/geojson.py -- where that picture is
+  decided.
+-->
+<style>
+  :root {
+    --ink: #16212b;
+    --muted: #5d6d7c;
+    --line: #dde5ec;
+    --bg: #eef2f5;
+    --panel: #ffffff;
+    --head: #0e1b26;
+    --accent: #1f78b4;
+    --accent-dark: #08519c;
+    --good: #15803d;
+    --warn: #a35a06;
+    --bad: #b91c1c;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ---------------- header ---------------- */
+  header {
+    background: var(--head);
+    color: #fff;
+    padding: 10px 18px;
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    flex: none;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .01em; }
+  header .sub { color: #93a7b6; font-size: 12.5px; }
+  header .spacer { flex: 1; }
+  header a { color: #9dc7e6; text-decoration: none; font-size: 12.5px; }
+  header a:hover { text-decoration: underline; }
+  #health { font-size: 12.5px; color: #93a7b6; display: flex; align-items: center; gap: 6px; }
+  #health .dot { width: 8px; height: 8px; border-radius: 50%; background: #64748b; }
+  #health.up .dot { background: #4ade80; }
+  #health.down .dot { background: #f87171; }
+
+  /* ---------------- layout ---------------- */
+  main { flex: 1; display: flex; min-height: 0; }
+  #map {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    background: #cfd8de;
+    cursor: grab;
+    touch-action: none;
+  }
+  #map.dragging { cursor: grabbing; }
+  #map.picking { cursor: crosshair; }
+  #tiles { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  #tiles img {
+    position: absolute;
+    /* One pixel wider than the tile it holds. Fractional zoom scales the whole layer, and
+       at a scale of 1.4 the boundary between two exactly-adjacent tiles lands on a half
+       pixel and shows as a seam. Each tile still starts at its exact 256-multiple origin,
+       so the extra pixel overlaps its neighbour rather than shifting the map. */
+    width: 257px;
+    height: 257px;
+    user-select: none;
+    -webkit-user-drag: none;
+  }
+  #overlay { position: absolute; inset: 0; pointer-events: none; }
+  #overlay .hit { pointer-events: auto; cursor: pointer; }
+
+  .map-ui {
+    position: absolute;
+    z-index: 5;
+    background: rgba(255, 255, 255, .94);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: 0 1px 4px rgba(15, 30, 45, .18);
+  }
+  #layers { top: 10px; right: 10px; display: flex; overflow: hidden; }
+  #layers button {
+    border: 0; background: none; padding: 6px 11px; font: inherit; font-size: 12.5px;
+    cursor: pointer; color: var(--muted);
+  }
+  #layers button + button { border-left: 1px solid var(--line); }
+  #layers button.on { background: var(--accent); color: #fff; }
+  #zoom { top: 52px; right: 10px; display: flex; flex-direction: column; overflow: hidden; }
+  #zoom button {
+    border: 0; background: none; width: 30px; height: 28px; font: inherit; font-size: 15px;
+    cursor: pointer; color: var(--ink);
+  }
+  #zoom button + button { border-top: 1px solid var(--line); }
+  #zoom button:hover { background: #eef4f8; }
+  #legend { top: 10px; left: 10px; padding: 8px 10px; font-size: 12px; max-width: 220px; }
+  #legend .row { display: flex; align-items: center; gap: 7px; margin: 3px 0; }
+  #legend .sw { width: 16px; height: 10px; border-radius: 2px; flex: none; }
+  #legend .sw.line { height: 0; border-top: 2.5px solid #e31a1c; }
+  #legend .sw.dot { width: 10px; height: 10px; border-radius: 50%; }
+  #legend h4 { margin: 0 0 5px; font-size: 11px; text-transform: uppercase;
+               letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+  #attribution {
+    position: absolute; bottom: 0; right: 0; z-index: 5;
+    background: rgba(255, 255, 255, .82); font-size: 10.5px; color: #47586a;
+    padding: 2px 6px; border-top-left-radius: 4px;
+  }
+  #scale {
+    position: absolute; bottom: 22px; right: 10px; z-index: 5;
+    font-size: 11px; color: #22323f; text-align: right;
+    text-shadow: 0 0 3px #fff, 0 0 3px #fff;
+  }
+  #scale .bar {
+    height: 5px; border: 1.5px solid #22323f; border-top: 0; margin-top: 1px;
+    margin-left: auto;
+  }
+  #pick-hint {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 6;
+    background: var(--accent-dark); color: #fff; font-size: 12.5px;
+    padding: 5px 12px; border-radius: 20px; display: none;
+  }
+  #map.picking #pick-hint { display: block; }
+
+  /* ---------------- panel ---------------- */
+  #panel {
+    width: 400px; flex: none; background: var(--panel); border-left: 1px solid var(--line);
+    overflow-y: auto; overscroll-behavior: contain;
+  }
+  .block { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .block h2 {
+    margin: 0 0 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--muted); font-weight: 600;
+  }
+
+  #drop {
+    border: 2px dashed #c3d0da; border-radius: var(--radius); padding: 18px 14px;
+    text-align: center; color: var(--muted); cursor: pointer; background: #fafcfd;
+    transition: border-color .12s, background .12s;
+  }
+  #drop:hover, #drop.over { border-color: var(--accent); background: #f0f7fc; }
+  #drop strong { color: var(--ink); display: block; font-size: 14px; margin-bottom: 2px; }
+  #drop .file { color: var(--accent-dark); font-weight: 600; word-break: break-all; }
+
+  .opts { display: grid; grid-template-columns: 1fr 1fr; gap: 9px 12px; margin-top: 12px; }
+  .opts label { font-size: 11.5px; color: var(--muted); display: block; }
+  .opts input[type=number] {
+    width: 100%; font: inherit; font-size: 13px; padding: 5px 7px; margin-top: 2px;
+    border: 1px solid var(--line); border-radius: 5px; color: var(--ink); background: #fff;
+  }
+  .opts .wide { grid-column: 1 / -1; }
+  .check { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink); }
+  .check input { margin: 0; }
+  .hint { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+
+  button.action {
+    width: 100%; margin-top: 12px; padding: 9px 12px; font: inherit; font-weight: 600;
+    color: #fff; background: var(--accent-dark); border: 0; border-radius: 6px; cursor: pointer;
+  }
+  button.action:hover { background: #06407a; }
+  button.action:disabled { background: #9fb4c4; cursor: default; }
+  button.ghost {
+    font: inherit; font-size: 12px; padding: 4px 9px; border: 1px solid var(--line);
+    background: #fff; border-radius: 5px; cursor: pointer; color: var(--ink);
+  }
+  button.ghost:hover { border-color: var(--accent); color: var(--accent-dark); }
+  button.ghost.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  .pour { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .pour code { font-size: 11.5px; color: var(--accent-dark); }
+
+  #status { display: none; }
+  #status.on { display: block; }
+  .spinner {
+    width: 15px; height: 15px; border: 2px solid #cddbe6; border-top-color: var(--accent);
+    border-radius: 50%; animation: spin .8s linear infinite; flex: none;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .working { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+
+  .card {
+    border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 6px;
+    padding: 11px 12px; margin-bottom: 10px; cursor: pointer; background: #fff;
+  }
+  .card:hover { border-color: #b9cbd9; border-left-color: var(--accent); background: #fafcfe; }
+  .card.sel { background: #f0f7fc; border-color: var(--accent); }
+  .card.alt { border-left-color: #93bcd8; }
+  .card.rejected { border-left-color: var(--bad); }
+  .card .top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .card .rank {
+    width: 21px; height: 21px; border-radius: 50%; background: var(--accent-dark);
+    color: #fff; font-size: 12px; font-weight: 700; display: grid; place-items: center; flex: none;
+  }
+  .card.alt .rank { background: #7ba9c8; }
+  .card.rejected .rank { background: var(--bad); }
+  .card .headline { font-size: 15px; font-weight: 600; }
+  .card .headline span { font-weight: 400; color: var(--muted); font-size: 13px; }
+
+  .chip {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; font-weight: 600;
+    padding: 2px 7px; border-radius: 10px; background: #eaf1f6; color: var(--muted);
+  }
+  .chip.high { background: #dcf5e4; color: var(--good); }
+  .chip.medium { background: #fdf0da; color: var(--warn); }
+  .chip.low { background: #fde4e4; color: var(--bad); }
+
+  .why { margin: 8px 0 0; padding-left: 17px; color: var(--muted); font-size: 12.5px; }
+  .why li { margin: 1px 0; }
+
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 12px; margin-top: 10px; }
+  .stats.tri { grid-template-columns: 1fr 1fr 1fr; }
+  .stat .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .stat .v { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat .v small { font-weight: 400; color: var(--muted); font-size: 11.5px; }
+
+  .say { margin-top: 9px; font-size: 12.5px; color: var(--ink); background: #f4f8fb;
+         border-radius: 5px; padding: 7px 9px; }
+  .note { font-size: 12px; padding: 7px 9px; border-radius: 5px; margin-top: 7px; }
+  .note.warn { background: #fdf6ec; color: #7a4405; }
+  .note.bad { background: #fdecec; color: #8c1414; }
+  .note b { display: block; margin-bottom: 2px; }
+
+  table.kv { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.kv td { padding: 3px 0; vertical-align: top; }
+  table.kv td:first-child { color: var(--muted); padding-right: 10px; white-space: nowrap; }
+  table.kv td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+
+  details.more summary {
+    cursor: pointer; font-size: 12px; color: var(--accent-dark); list-style: none;
+    padding: 3px 0;
+  }
+  details.more summary::-webkit-details-marker { display: none; }
+  details.more summary::before { content: "▸ "; }
+  details.more[open] summary::before { content: "▾ "; }
+
+  .empty { color: var(--muted); font-size: 13px; }
+  .foot { padding: 12px 16px; font-size: 11.5px; color: var(--muted); }
+  .foot a { color: var(--accent-dark); }
+
+  @media (max-width: 860px) {
+    main { flex-direction: column; }
+    #map { height: 55vh; flex: none; }
+    #panel { width: auto; border-left: 0; border-top: 1px solid var(--line); flex: 1; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Pond Catchment Analysis</h1>
+  <span class="sub">contour map &rarr; catchment, pond site, annual runoff</span>
+  <span class="spacer"></span>
+  <span id="health"><span class="dot"></span><span class="txt">checking&hellip;</span></span>
+  <a id="docs-link" href="/docs" target="_blank" rel="noopener">API docs &rarr;</a>
+</header>
+
+<main>
+  <div id="map">
+    <div id="tiles"></div>
+    <svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div id="pick-hint">Click the map to place the pour point</div>
+    <div id="layers" class="map-ui">
+      <button data-layer="satellite" class="on">Satellite</button>
+      <button data-layer="street">Street</button>
+    </div>
+    <div id="zoom" class="map-ui">
+      <button id="zoom-in" title="Zoom in">+</button>
+      <button id="zoom-out" title="Zoom out">&minus;</button>
+      <button id="zoom-fit" title="Fit the results" style="font-size:12px">&#9634;</button>
+    </div>
+    <div id="legend" class="map-ui" hidden>
+      <h4>Legend</h4>
+    </div>
+    <div id="scale"><span class="label"></span><div class="bar"></div></div>
+    <div id="attribution"></div>
+  </div>
+
+  <aside id="panel">
+    <div class="block">
+      <h2>Contour map</h2>
+      <div id="drop">
+        <strong>Drop a .kml or .kmz here</strong>
+        <span>or click to choose a file</span>
+      </div>
+      <input type="file" id="file" accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" hidden>
+
+      <div class="opts">
+        <div class="wide check">
+          <input type="checkbox" id="ensemble" checked>
+          <label for="ensemble" style="font-size:12.5px;color:var(--ink)">
+            Cross-check on three grids (slower, gives an error bar)
+          </label>
+        </div>
+        <div>
+          <label for="top_n">Sites to return</label>
+          <input type="number" id="top_n" value="3" min="1" max="10" step="1">
+        </div>
+        <div>
+          <label for="curve_number">Curve number</label>
+          <input type="number" id="curve_number" value="75" min="30" max="98" step="1">
+        </div>
+        <div>
+          <label for="target_depth_m">Pond depth (m)</label>
+          <input type="number" id="target_depth_m" value="3" min="0.5" step="0.5">
+        </div>
+        <div>
+          <label for="rainfall_mm">Rainfall (mm/yr)</label>
+          <input type="number" id="rainfall_mm" value="1200" min="1" step="50">
+        </div>
+        <div class="wide">
+          <label for="grid_resolution">Grid resolution (m) &mdash; blank to derive from the contours</label>
+          <input type="number" id="grid_resolution" placeholder="auto" min="2" max="20" step="0.5">
+        </div>
+      </div>
+
+      <div class="pour">
+        <button class="ghost" id="pick">Pick a pour point</button>
+        <code id="pour-txt"></code>
+        <button class="ghost" id="pick-clear" hidden>Clear</button>
+      </div>
+      <div class="hint">
+        With a pour point set, the service analyses that spot instead of ranking sites.
+      </div>
+
+      <button class="action" id="run" disabled>Analyse</button>
+    </div>
+
+    <div class="block" id="status"></div>
+    <div id="results"></div>
+
+    <div class="foot">
+      Catchments are delineated by D8 steepest descent on a DEM interpolated from the
+      contours; runoff is SCS-CN applied per rain day and summed.
+      <a href="/docs" target="_blank" rel="noopener">Full API documentation</a>.
+    </div>
+  </aside>
+</main>
+
+<script>
+"use strict";
+
+/* --------------------------------------------------------------------------
+ * The service
+ * ----------------------------------------------------------------------- */
+// Opened from disk, the page still talks to a locally running service. Served by that
+// service -- which is the normal case -- it talks to its own origin, so the deployed URL
+// needs no configuration at all.
+const API = location.protocol === "file:" ? "http://localhost:8000" : "";
+document.getElementById("docs-link").href = API + "/docs";
+
+/* --------------------------------------------------------------------------
+ * Web Mercator
+ * ----------------------------------------------------------------------- */
+const TILE = 256;
+const MIN_ZOOM = 2;
+
+// Both directions in *world fractions* (0..1 across the whole map at any zoom), so the
+// arithmetic below is zoom-independent and there is exactly one place that multiplies by
+// a pixel count.
+function project(lon, lat) {
+  const s = Math.sin(Math.max(-85.05, Math.min(85.05, lat)) * Math.PI / 180);
+  return [
+    (lon + 180) / 360,
+    0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI),
+  ];
+}
+function unproject(fx, fy) {
+  return [
+    fx * 360 - 180,
+    Math.atan(Math.sinh(Math.PI * (1 - 2 * fy))) * 180 / Math.PI,
+  ];
+}
+
+const LAYERS = {
+  satellite: {
+    // Note the y/x order: Esri's REST tiles are {z}/{row}/{col}, not the XYZ convention.
+    url: (z, x, y) =>
+      `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,
+    max: 19,
+    credit: "Imagery &copy; Esri, Maxar, Earthstar Geographics",
+  },
+  street: {
+    url: (z, x, y) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`,
+    max: 19,
+    credit: "&copy; OpenStreetMap contributors",
+  },
+};
+
+/* --------------------------------------------------------------------------
+ * The map
+ * ----------------------------------------------------------------------- */
+const mapEl = document.getElementById("map");
+const tilesEl = document.getElementById("tiles");
+const overlayEl = document.getElementById("overlay");
+const SVGNS = "http://www.w3.org/2000/svg";
+
+const view = { fx: 0.5, fy: 0.5, zoom: 3, layer: "satellite" };
+const tiles = new Map();      // "layer/z/x/y" -> <img>, kept so panning back is instant
+const TILE_CACHE_MAX = 400;
+
+let features = [];            // the GeoJSON features currently drawn
+let selectedRank = 1;
+let pourPoint = null;
+
+function viewport() {
+  return { w: mapEl.clientWidth, h: mapEl.clientHeight };
+}
+function pixelsPerWorld() {
+  return TILE * Math.pow(2, view.zoom);
+}
+function screenOf(lon, lat) {
+  const { w, h } = viewport();
+  const p = pixelsPerWorld();
+  const [fx, fy] = project(lon, lat);
+  return [(fx - view.fx) * p + w / 2, (fy - view.fy) * p + h / 2];
+}
+function lonLatOf(px, py) {
+  const { w, h } = viewport();
+  const p = pixelsPerWorld();
+  return unproject(view.fx + (px - w / 2) / p, view.fy + (py - h / 2) / p);
+}
+
+function renderTiles() {
+  const layer = LAYERS[view.layer];
+  const { w, h } = viewport();
+  // Tiles exist at whole zooms only; the fractional part becomes a CSS scale, which is
+  // what makes wheel zoom continuous instead of stepping between levels.
+  const tz = Math.max(0, Math.min(layer.max, Math.round(view.zoom)));
+  const scale = Math.pow(2, view.zoom - tz);
+  const world = TILE * Math.pow(2, tz);
+  const left = view.fx * world - w / (2 * scale);
+  const top = view.fy * world - h / (2 * scale);
+
+  tilesEl.style.transform = `scale(${scale}) translate(${-left}px, ${-top}px)`;
+
+  const span = Math.pow(2, tz);
+  const x0 = Math.floor(left / TILE), x1 = Math.floor((left + w / scale) / TILE);
+  const y0 = Math.max(0, Math.floor(top / TILE));
+  const y1 = Math.min(span - 1, Math.floor((top + h / scale) / TILE));
+
+  const wanted = new Set();
+  for (let x = x0; x <= x1; x++) {
+    for (let y = y0; y <= y1; y++) {
+      // Wrap east-west so dragging across the antimeridian does not leave a void.
+      const wx = ((x % span) + span) % span;
+      const key = `${view.layer}/${tz}/${wx}/${y}`;
+      wanted.add(key);
+      let img = tiles.get(key);
+      if (!img) {
+        img = new Image();
+        img.decoding = "async";
+        img.alt = "";
+        img.src = layer.url(tz, wx, y);
+        // A tile the server does not have should leave the background, not a broken icon.
+        img.addEventListener("error", () => { img.style.visibility = "hidden"; });
+        tiles.set(key, img);
+      }
+      img.style.left = x * TILE + "px";
+      img.style.top = y * TILE + "px";
+      if (!img.parentNode) tilesEl.appendChild(img);
+    }
+  }
+  for (const [key, img] of tiles) {
+    if (!wanted.has(key) && img.parentNode) img.remove();
+  }
+  if (tiles.size > TILE_CACHE_MAX) {
+    for (const [key, img] of tiles) {
+      if (tiles.size <= TILE_CACHE_MAX) break;
+      if (!wanted.has(key)) { img.remove(); tiles.delete(key); }
+    }
+  }
+  document.getElementById("attribution").innerHTML = layer.credit;
+}
+
+/* ---- the GeoJSON overlay ---- */
+function ringPath(ring) {
+  let d = "";
+  for (let i = 0; i < ring.length; i++) {
+    const [x, y] = screenOf(ring[i][0], ring[i][1]);
+    d += (i ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1);
+  }
+  return d + "Z";
+}
+function polygonPath(geometry) {
+  const parts = geometry.type === "MultiPolygon" ? geometry.coordinates : [geometry.coordinates];
+  let d = "";
+  for (const polygon of parts) for (const ring of polygon) d += ringPath(ring);
+  return d;
+}
+function linePath(geometry) {
+  const lines = geometry.type === "MultiLineString" ? geometry.coordinates : [geometry.coordinates];
+  let d = "";
+  for (const line of lines) {
+    for (let i = 0; i < line.length; i++) {
+      const [x, y] = screenOf(line[i][0], line[i][1]);
+      d += (i ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1);
+    }
+  }
+  return d;
+}
+function svg(tag, attrs) {
+  const node = document.createElementNS(SVGNS, tag);
+  for (const key in attrs) node.setAttribute(key, attrs[key]);
+  return node;
+}
+function tip(node, text) {
+  const title = document.createElementNS(SVGNS, "title");
+  title.textContent = text;
+  node.appendChild(title);
+  return node;
+}
+
+// Areas first, then lines, then the points that sit on them -- and within the areas, the
+// selected site last so its outline is never buried under an alternative's fill.
+function drawOrder(list) {
+  const weight = (f) => {
+    const role = f.properties.role;
+    if (role === "catchment") return f.properties.rank === selectedRank ? 1 : 0;
+    if (role === "pond") return 2;
+    if (role === "flow_path") return 3;
+    return 4;
+  };
+  return list.map((f, i) => [f, i]).sort((a, b) => weight(a[0]) - weight(b[0]) || a[1] - b[1])
+             .map(([f]) => f);
+}
+
+function renderOverlay() {
+  const { w, h } = viewport();
+  overlayEl.setAttribute("width", w);
+  overlayEl.setAttribute("height", h);
+  overlayEl.replaceChildren();
+
+  for (const feature of drawOrder(features)) {
+    const props = feature.properties || {};
+    const geometry = feature.geometry;
+    if (!geometry || !geometry.coordinates) continue;
+    const selected = props.rank === selectedRank;
+    const type = geometry.type;
+
+    if (type === "Polygon" || type === "MultiPolygon") {
+      const catchment = props.role === "catchment";
+      const node = svg("path", {
+        d: polygonPath(geometry),
+        "fill-rule": "evenodd",
+        fill: props.fill || "#a6cee3",
+        "fill-opacity": catchment && !selected ? 0.12 : (props["fill-opacity"] ?? 0.25),
+        stroke: props.stroke || "#1f78b4",
+        "stroke-width": catchment ? (selected ? 2.5 : 1.2) : 1.5,
+        "stroke-dasharray": catchment && !selected ? "5 4" : "none",
+        "stroke-linejoin": "round",
+      });
+      overlayEl.appendChild(tip(node, describe(props)));
+    } else if (type === "LineString" || type === "MultiLineString") {
+      overlayEl.appendChild(tip(svg("path", {
+        d: linePath(geometry),
+        fill: "none",
+        stroke: props.stroke || "#e31a1c",
+        "stroke-width": props["stroke-width"] || 2,
+        "stroke-opacity": selected ? 0.95 : 0.4,
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round",
+      }), describe(props)));
+    } else if (type === "Point") {
+      const [x, y] = screenOf(geometry.coordinates[0], geometry.coordinates[1]);
+      const group = svg("g", { class: "hit" });
+      const radius = selected ? 9 : 6.5;
+      group.appendChild(svg("circle", {
+        cx: x, cy: y, r: radius,
+        fill: props["marker-color"] || "#08519c",
+        stroke: "#fff", "stroke-width": 2,
+      }));
+      if (props.rank != null) {
+        const label = svg("text", {
+          x: x, y: y + (selected ? 3.5 : 3), "text-anchor": "middle",
+          "font-size": selected ? 11 : 9, "font-weight": "700", fill: "#fff",
+          "font-family": "system-ui, sans-serif",
+        });
+        label.textContent = props.rank;
+        group.appendChild(label);
+      }
+      tip(group, describe(props));
+      group.addEventListener("click", () => selectSite(props.rank));
+      overlayEl.appendChild(group);
+    }
+  }
+
+  if (pourPoint) {
+    const [x, y] = screenOf(pourPoint.lon, pourPoint.lat);
+    overlayEl.appendChild(svg("path", {
+      d: `M${x - 9} ${y}H${x + 9}M${x} ${y - 9}V${y + 9}`,
+      stroke: "#b91c1c", "stroke-width": 2.5, "stroke-linecap": "round",
+    }));
+    overlayEl.appendChild(svg("circle", {
+      cx: x, cy: y, r: 5, fill: "none", stroke: "#b91c1c", "stroke-width": 2.5,
+    }));
+  }
+}
+
+function describe(props) {
+  const lines = [];
+  const label = {
+    catchment: "Catchment", pond: "Pond", flow_path: "Longest flow path",
+    pond_site: "Pond site",
+  }[props.role] || props.role;
+  lines.push(props.rank ? `${label} — site ${props.rank}` : label);
+  const skip = new Set(["role", "rank", "stroke", "fill", "fill-opacity", "stroke-width",
+                        "marker-color", "marker-symbol", "warnings"]);
+  for (const key in props) {
+    if (skip.has(key) || props[key] == null) continue;
+    lines.push(`${key.replace(/_/g, " ")}: ${props[key]}`);
+  }
+  return lines.join("\n");
+}
+
+function renderScale() {
+  // Metres per pixel at the centre latitude: the equatorial figure shrunk by cos(lat),
+  // which is the same correction the service's own projection applies.
+  const lat = unproject(view.fx, view.fy)[1];
+  const perPixel = 40075016.686 * Math.cos(lat * Math.PI / 180) / pixelsPerWorld();
+  let metres = perPixel * 90;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(metres)));
+  metres = [1, 2, 5, 10].find((f) => f * magnitude >= metres * 0.6) * magnitude;
+  const el = document.getElementById("scale");
+  el.querySelector(".label").textContent =
+    metres >= 1000 ? (metres / 1000) + " km" : metres + " m";
+  el.querySelector(".bar").style.width = (metres / perPixel).toFixed(0) + "px";
+}
+
+let frame = null;
+function render() {
+  if (frame) return;
+  frame = requestAnimationFrame(() => {
+    frame = null;
+    renderTiles();
+    renderOverlay();
+    renderScale();
+  });
+}
+
+function fitBounds(bbox, pad) {
+  const { w, h } = viewport();
+  pad = pad ?? 42;
+  const a = project(bbox[0], bbox[3]);
+  const b = project(bbox[2], bbox[1]);
+  const dx = Math.max(b[0] - a[0], 1e-9), dy = Math.max(b[1] - a[1], 1e-9);
+  const zoom = Math.min(
+    Math.log2(Math.max(w - 2 * pad, 50) / (TILE * dx)),
+    Math.log2(Math.max(h - 2 * pad, 50) / (TILE * dy)),
+  );
+  view.fx = (a[0] + b[0]) / 2;
+  view.fy = (a[1] + b[1]) / 2;
+  view.zoom = Math.max(MIN_ZOOM, Math.min(LAYERS[view.layer].max + 0.5, zoom));
+  render();
+}
+
+/* ---- interaction ---- */
+let drag = null;
+mapEl.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0) return;
+  // The controls sit inside the map so they float over it. Capturing the pointer for a
+  // drag would redirect the matching pointerup to the map, and the browser would never
+  // synthesise the click -- which left every button on the map dead until this guard.
+  if (event.target.closest(".map-ui")) return;
+  drag = { x: event.clientX, y: event.clientY, moved: 0 };
+  mapEl.setPointerCapture(event.pointerId);
+  mapEl.classList.add("dragging");
+});
+mapEl.addEventListener("pointermove", (event) => {
+  if (!drag) return;
+  const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
+  drag.moved += Math.abs(dx) + Math.abs(dy);
+  drag.x = event.clientX;
+  drag.y = event.clientY;
+  const p = pixelsPerWorld();
+  view.fx -= dx / p;
+  view.fy = Math.max(0, Math.min(1, view.fy - dy / p));
+  render();
+});
+mapEl.addEventListener("pointerup", (event) => {
+  const wasClick = drag && drag.moved < 4;
+  drag = null;
+  mapEl.classList.remove("dragging");
+  if (wasClick && picking) {
+    const rect = mapEl.getBoundingClientRect();
+    const [lon, lat] = lonLatOf(event.clientX - rect.left, event.clientY - rect.top);
+    setPourPoint(lon, lat);
+    setPicking(false);
+  }
+});
+mapEl.addEventListener("pointercancel", () => { drag = null; mapEl.classList.remove("dragging"); });
+
+mapEl.addEventListener("wheel", (event) => {
+  if (event.target.closest(".map-ui")) return;
+  event.preventDefault();
+  const rect = mapEl.getBoundingClientRect();
+  const px = event.clientX - rect.left, py = event.clientY - rect.top;
+  zoomBy(event.deltaY > 0 ? -0.5 : 0.5, px, py);
+}, { passive: false });
+
+function zoomBy(delta, px, py) {
+  const { w, h } = viewport();
+  px = px ?? w / 2;
+  py = py ?? h / 2;
+  // Hold the ground under the cursor still: read its world fraction before the zoom
+  // changes, then place the centre so that fraction lands back on the same pixel.
+  const before = pixelsPerWorld();
+  const fx = view.fx + (px - w / 2) / before;
+  const fy = view.fy + (py - h / 2) / before;
+  view.zoom = Math.max(MIN_ZOOM, Math.min(LAYERS[view.layer].max + 0.5, view.zoom + delta));
+  const after = pixelsPerWorld();
+  view.fx = fx - (px - w / 2) / after;
+  view.fy = fy - (py - h / 2) / after;
+  render();
+}
+
+document.getElementById("zoom-in").onclick = () => zoomBy(1);
+document.getElementById("zoom-out").onclick = () => zoomBy(-1);
+document.getElementById("zoom-fit").onclick = () => { if (lastBBox) fitBounds(lastBBox); };
+for (const button of document.querySelectorAll("#layers button")) {
+  button.onclick = () => {
+    view.layer = button.dataset.layer;
+    for (const other of document.querySelectorAll("#layers button")) {
+      other.classList.toggle("on", other === button);
+    }
+    render();
+  };
+}
+new ResizeObserver(render).observe(mapEl);
+
+/* --------------------------------------------------------------------------
+ * Pour point
+ * ----------------------------------------------------------------------- */
+let picking = false;
+function setPicking(on) {
+  picking = on;
+  mapEl.classList.toggle("picking", on);
+  document.getElementById("pick").classList.toggle("on", on);
+}
+function setPourPoint(lon, lat) {
+  pourPoint = lon == null ? null : { lon, lat };
+  document.getElementById("pour-txt").textContent =
+    pourPoint ? `${pourPoint.lat.toFixed(6)}, ${pourPoint.lon.toFixed(6)}` : "";
+  document.getElementById("pick-clear").hidden = !pourPoint;
+  render();
+}
+document.getElementById("pick").onclick = () => setPicking(!picking);
+document.getElementById("pick-clear").onclick = () => setPourPoint(null);
+
+/* --------------------------------------------------------------------------
+ * Small DOM helpers -- everything is built with textContent, never innerHTML, so a
+ * filename or a warning from the service cannot become markup.
+ * ----------------------------------------------------------------------- */
+function h(tag, attrs, children) {
+  const node = document.createElement(tag);
+  for (const key in (attrs || {})) {
+    if (key === "class") node.className = attrs[key];
+    else if (key === "text") node.textContent = attrs[key];
+    else if (key.startsWith("on")) node[key] = attrs[key];
+    else if (attrs[key] !== null && attrs[key] !== undefined) node.setAttribute(key, attrs[key]);
+  }
+  for (const child of [].concat(children || [])) {
+    if (child == null || child === false) continue;
+    node.appendChild(typeof child === "string" ? document.createTextNode(child) : child);
+  }
+  return node;
+}
+const NUM = new Intl.NumberFormat("en-GB");
+function num(value, digits) {
+  if (value == null || !isFinite(value)) return "—";
+  return NUM.format(digits ? Number(value.toFixed(digits)) : Math.round(value));
+}
+function stat(key, value, unit) {
+  return h("div", { class: "stat" }, [
+    h("div", { class: "k", text: key }),
+    h("div", { class: "v" }, [String(value), unit ? h("small", { text: " " + unit }) : null]),
+  ]);
+}
+function rows(pairs) {
+  return h("table", { class: "kv" }, pairs.filter(Boolean).map(([k, v]) =>
+    h("tr", null, [h("td", { text: k }), h("td", { text: String(v) })])));
+}
+function noteList(messages, kind) {
+  return messages.map((message) => h("div", { class: "note " + kind, text: message }));
+}
+
+/* --------------------------------------------------------------------------
+ * Results
+ * ----------------------------------------------------------------------- */
+const resultsEl = document.getElementById("results");
+const statusEl = document.getElementById("status");
+let lastBBox = null;
+let lastBody = null;
+
+function siteCard(site, recommended) {
+  const c = site.catchment;
+  const s = site.storage;
+  const r = site.runoff;
+  const rejected = !site.is_recommended;
+  const card = h("div", {
+    class: "card" + (recommended ? "" : " alt") + (rejected ? " rejected" : "") +
+           (site.rank === selectedRank ? " sel" : ""),
+    onclick: () => selectSite(site.rank),
+  }, [
+    h("div", { class: "top" }, [
+      h("div", { class: "rank", text: String(site.rank) }),
+      h("div", { class: "headline" }, [
+        num(c.area_ha, 1) + " ha",
+        h("span", { text: c.area_uncertainty_ha != null ? ` ± ${num(c.area_uncertainty_ha, 1)}` : "" }),
+      ]),
+      h("span", { class: "chip " + c.confidence, text: c.confidence }),
+    ]),
+    h("div", { class: "hint", text: `${site.location.lat.toFixed(6)}, ${site.location.lon.toFixed(6)}` }),
+    h("ul", { class: "why" }, site.why.map((reason) => h("li", { text: reason }))),
+    h("div", { class: "stats tri" }, [
+      stat("Capacity", num(s.capacity_m3), "m³"),
+      stat("Runoff", num(r.annual_runoff_m3), "m³/yr"),
+      stat("Fill ratio", r.fill_ratio < 0 ? "—" : num(r.fill_ratio, 2) + "×"),
+    ]),
+  ]);
+
+  if (recommended) {
+    card.appendChild(h("div", { class: "stats" }, [
+      stat("Relief", num(c.relief_m, 1), "m"),
+      stat("Flow path", num(c.longest_flow_path_m), "m"),
+      stat("Time of conc.", num(c.time_of_concentration_min, 1), "min"),
+      stat("Edge contact", num(c.edge_contact_pct, 1), "%"),
+      stat("Runoff depth", num(r.runoff_depth_mm, 1), "mm"),
+      stat("Coefficient", num(r.runoff_coefficient * 100, 1), "%"),
+      stat("Water surface", num(s.surface_area_m2), "m²"),
+      stat("Usable depth", num(s.usable_depth_m ?? s.max_depth_m, 2), "m"),
+    ]));
+    card.appendChild(h("div", { class: "say", text: r.assessment }));
+    if (c.is_lower_bound) {
+      card.appendChild(h("div", { class: "note warn", text:
+        "The catchment touches the edge of the mapped data, so this area is a lower bound." }));
+    }
+  }
+  for (const warning of site.warnings || []) {
+    card.appendChild(h("div", { class: "note " + (rejected ? "bad" : "warn"), text: warning }));
+  }
+  return card;
+}
+
+function selectSite(rank) {
+  if (rank == null) return;
+  selectedRank = rank;
+  if (lastBody) renderResults(lastBody, false);
+  const catchment = features.find(
+    (f) => f.properties.role === "catchment" && f.properties.rank === rank);
+  if (catchment) fitBounds(bboxOf(catchment));
+  render();
+}
+
+function bboxOf(feature) {
+  let minLon = 180, minLat = 90, maxLon = -180, maxLat = -90;
+  (function walk(coordinates) {
+    if (typeof coordinates[0] === "number") {
+      minLon = Math.min(minLon, coordinates[0]); maxLon = Math.max(maxLon, coordinates[0]);
+      minLat = Math.min(minLat, coordinates[1]); maxLat = Math.max(maxLat, coordinates[1]);
+      return;
+    }
+    coordinates.forEach(walk);
+  })(feature.geometry.coordinates);
+  return [minLon, minLat, maxLon, maxLat];
+}
+
+function renderResults(body, refit) {
+  lastBody = body;
+  const input = body.input, dem = body.dem, site = body.recommended_site;
+  resultsEl.replaceChildren();
+
+  const sites = h("div", { class: "block" }, [h("h2", { text: "Recommended site" })]);
+  sites.appendChild(siteCard(site, true));
+  if (body.alternative_sites.length) {
+    sites.appendChild(h("h2", { text: "Alternatives", style: "margin-top:14px" }));
+    for (const alternative of body.alternative_sites) {
+      sites.appendChild(siteCard(alternative, false));
+    }
+  }
+  resultsEl.appendChild(sites);
+
+  const storage = site.storage;
+  resultsEl.appendChild(h("div", { class: "block" }, [
+    h("h2", { text: "The map" }),
+    rows([
+      ["File", input.filename],
+      ["Contours", `${NUM.format(input.contour_count)} lines, ${NUM.format(input.vertex_count)} vertices`],
+      ["Elevations from", input.elevation_source.replace(/_/g, " ")],
+      ["Contour interval", input.interval_m ? input.interval_m + " m" : "—"],
+      ["Elevation range", `${input.elevation_range_m[0]}–${input.elevation_range_m[1]} m`],
+      ["Mapped area", num(input.mapped_area_ha, 1) + " ha"],
+      ["DEM grid", `${dem.shape[0]} × ${dem.shape[1]} at ${dem.resolution_m} m (${dem.resolution_source})`],
+      ["Smoothing σ", dem.smoothing_sigma_m + " m"],
+      body.search && ["Stream threshold", num(body.search.stream_threshold_ha, 1) + " ha"],
+      body.search && ["Candidate cells", NUM.format(body.search.candidate_cells)],
+      ["Analysis time", num(body.timing_ms.total / 1000, 1) + " s"],
+    ]),
+    h("details", { class: "more" }, [
+      h("summary", { text: "Stage–storage curve" }),
+      rows(storage.stage_storage.map(([depth, area, volume]) =>
+        [depth.toFixed(2) + " m", `${num(area)} m² · ${num(volume)} m³`])),
+    ]),
+    h("details", { class: "more" }, [
+      h("summary", { text: "Timings by stage" }),
+      rows(Object.entries(body.timing_ms).map(([stage, ms]) => [stage, num(ms) + " ms"])),
+    ]),
+  ]));
+
+  if (body.warnings.length) {
+    resultsEl.appendChild(h("div", { class: "block" }, [
+      h("h2", { text: "Caveats" }),
+      ...noteList(body.warnings, "warn"),
+    ]));
+  }
+
+  features = body.geojson.features || [];
+  lastBBox = body.geojson.bbox || null;
+  buildLegend(true);
+  if (refit && lastBBox) fitBounds(lastBBox); else render();
+}
+
+function buildLegend(visible) {
+  const legend = document.getElementById("legend");
+  legend.hidden = !visible;
+  if (!visible) return;
+  legend.replaceChildren(h("h4", { text: "Legend" }));
+  const entries = [
+    ["Catchment (selected)", "#a6cee3", "sw"],
+    ["Other catchments", "#d7e7f2", "sw"],
+    ["Pond at capacity", "#3182bd", "sw"],
+    ["Longest flow path", null, "sw line"],
+    ["Pond site", "#08519c", "sw dot"],
+  ];
+  for (const [label, colour, cls] of entries) {
+    const swatch = h("div", { class: cls });
+    if (colour) swatch.style.background = colour;
+    if (cls === "sw") swatch.style.border = "1px solid #1f78b4";
+    legend.appendChild(h("div", { class: "row" }, [swatch, h("span", { text: label })]));
+  }
+  legend.hidden = false;
+}
+
+/* --------------------------------------------------------------------------
+ * The request
+ * ----------------------------------------------------------------------- */
+const fileInput = document.getElementById("file");
+const dropEl = document.getElementById("drop");
+const runButton = document.getElementById("run");
+let chosen = null;
+
+function size(bytes) {
+  return bytes >= 1e6 ? (bytes / 1e6).toFixed(1) + " MB" : Math.max(1, Math.round(bytes / 1e3)) + " kB";
+}
+
+function chooseFile(file) {
+  chosen = file;
+  dropEl.replaceChildren(
+    h("strong", { text: "Ready to analyse" }),
+    h("span", { class: "file", text: file.name }),
+    h("div", { class: "hint", text: size(file.size) + " — click to choose another" }),
+  );
+  runButton.disabled = false;
+}
+
+dropEl.onclick = () => fileInput.click();
+fileInput.onchange = () => { if (fileInput.files[0]) chooseFile(fileInput.files[0]); };
+for (const type of ["dragenter", "dragover"]) {
+  dropEl.addEventListener(type, (event) => { event.preventDefault(); dropEl.classList.add("over"); });
+}
+for (const type of ["dragleave", "drop"]) {
+  dropEl.addEventListener(type, (event) => { event.preventDefault(); dropEl.classList.remove("over"); });
+}
+dropEl.addEventListener("drop", (event) => {
+  const file = event.dataTransfer.files[0];
+  if (file) chooseFile(file);
+});
+// A file dropped anywhere but the zone should not navigate the browser away from the app.
+for (const type of ["dragover", "drop"]) {
+  document.addEventListener(type, (event) => event.preventDefault());
+}
+
+function optional(form, id, name) {
+  const value = document.getElementById(id).value.trim();
+  if (value !== "") form.append(name || id, value);
+}
+
+runButton.onclick = async () => {
+  if (!chosen) return;
+  const form = new FormData();
+  form.append("file", chosen, chosen.name);
+  form.append("ensemble", document.getElementById("ensemble").checked ? "true" : "false");
+  optional(form, "top_n");
+  optional(form, "curve_number");
+  optional(form, "target_depth_m");
+  optional(form, "rainfall_mm");
+  optional(form, "grid_resolution");
+  if (pourPoint) {
+    form.append("lat", pourPoint.lat);
+    form.append("lon", pourPoint.lon);
+  }
+
+  runButton.disabled = true;
+  resultsEl.replaceChildren();
+  features = [];
+  buildLegend(false);
+  render();
+
+  const started = Date.now();
+  const label = h("span", { text: "Analysing…" });
+  statusEl.replaceChildren(
+    h("div", { class: "working" }, [h("div", { class: "spinner" }), label]),
+    h("div", { class: "hint", text: document.getElementById("ensemble").checked
+      ? "Four grids: about ten seconds for a full contour sheet."
+      : "One grid: about four seconds for a full contour sheet." }),
+  );
+  statusEl.classList.add("on");
+  const ticker = setInterval(() => {
+    label.textContent = `Analysing… ${((Date.now() - started) / 1000).toFixed(1)} s`;
+  }, 100);
+
+  try {
+    const response = await fetch(API + "/api/v1/analyzeContour", { method: "POST", body: form });
+    const body = await response.json();
+    clearInterval(ticker);
+    if (!response.ok) {
+      statusEl.replaceChildren(
+        h("h2", { text: "Could not analyse this map" }),
+        h("div", { class: "note bad" }, [
+          h("b", { text: body.code || `HTTP ${response.status}` }),
+          body.detail || "The request failed.",
+        ]),
+        body.hint ? h("div", { class: "note warn", text: body.hint }) : null,
+      );
+      return;
+    }
+    statusEl.classList.remove("on");
+    selectedRank = 1;
+    renderResults(body, true);
+  } catch (error) {
+    clearInterval(ticker);
+    statusEl.replaceChildren(
+      h("h2", { text: "Could not reach the service" }),
+      h("div", { class: "note bad", text: String(error) }),
+      h("div", { class: "note warn", text: "Is the API running at " + (API || location.origin) + "?" }),
+    );
+  } finally {
+    runButton.disabled = false;
+  }
+};
+
+/* --------------------------------------------------------------------------
+ * Startup
+ * ----------------------------------------------------------------------- */
+(async function health() {
+  const el = document.getElementById("health");
+  try {
+    const body = await (await fetch(API + "/health")).json();
+    el.className = "up";
+    el.querySelector(".txt").textContent = "API v" + body.version;
+  } catch {
+    el.className = "down";
+    el.querySelector(".txt").textContent = "API unreachable";
+  }
+})();
+
+// Central India, where the sample sheet is -- so the page opens on ground rather than on
+// an ocean while it waits for a file.
+fitBounds([78.0, 19.0, 84.0, 24.0]);
+</script>
+</body>
+</html>

@@ -28,6 +28,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
+from app import main
 from app.config import settings
 from app.main import app
 from app.routers import analyze as analyze_module
@@ -100,10 +101,35 @@ def test_health_answers_without_doing_any_work(client: TestClient) -> None:
     assert body["version"] == settings.api.version
 
 
-def test_root_redirects_to_the_documentation(client: TestClient) -> None:
+def test_root_falls_back_to_the_docs_without_the_demo_page(
+    client: TestClient, monkeypatch, tmp_path
+) -> None:
+    """The page is a single static file, so "is it there" is the whole of the Phase 11
+    deployment check. If a build ever ships without it, the service stays usable."""
+    monkeypatch.setattr(main, "STATIC_DIR", tmp_path)
     response = client.get("/", follow_redirects=False)
     assert response.status_code in (302, 307)
     assert response.headers["location"] == settings.api.docs_url
+
+
+def test_root_serves_the_demo_page(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert ENDPOINT in response.text, "the page must post to the endpoint it documents"
+    assert client.get("/static/index.html").status_code == 200
+
+
+def test_demo_page_loads_nothing_from_a_third_party(client: TestClient) -> None:
+    """PLAN §5 asks for a CDN-free single file, and the reason is the deployment: the
+    page has to work behind a proxy that blocks unpkg and on a free-tier container with
+    no build step. Map tiles are the one exception -- they are imagery, requested by the
+    viewer's browser and credited on the map -- so this checks for external *code*.
+    """
+    page = client.get("/static/index.html").text
+    for tag in ("<script src=", "<link rel=\"stylesheet\"", "@import"):
+        assert tag not in page, f"{tag!r} would pull code from somewhere else"
+    assert page.count("<script") == 1, "one inline script, no external ones"
 
 
 def test_openapi_documents_the_endpoint_and_its_failures(client: TestClient) -> None:

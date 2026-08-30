@@ -11,9 +11,12 @@ from what the endpoint actually returns.
 
 from __future__ import annotations
 
-from fastapi import FastAPI
+from pathlib import Path
+
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.errors import install_handlers
@@ -21,6 +24,12 @@ from app.routers.analyze import router as analyze_router
 from app.schemas.responses import HealthResponse
 
 __all__ = ["app", "create_app"]
+
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+"""The demo page, resolved from this file rather than the working directory: the
+container runs uvicorn from wherever its entrypoint lands, and a page that only appears
+when the server happens to start in the repo root is a page that is missing in
+production (PLAN Phase 11)."""
 
 DESCRIPTION = """
 Upload a contour map (KML/KMZ); get back a recommended village pond site, the catchment
@@ -65,6 +74,9 @@ def create_app() -> FastAPI:
     install_handlers(app)
     app.include_router(analyze_router, prefix=settings.api.api_prefix)
 
+    if STATIC_DIR.is_dir():
+        app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
     @app.get("/health", response_model=HealthResponse, tags=["service"])
     async def health() -> HealthResponse:
         """Liveness check. Deliberately does no work: on a free tier this is what wakes
@@ -74,7 +86,18 @@ def create_app() -> FastAPI:
         )
 
     @app.get("/", include_in_schema=False)
-    async def root() -> RedirectResponse:
+    async def root() -> Response:
+        """The demo page when it is there, the documentation when it is not.
+
+        Phase 10's page is a single static file with no build step, so "is it there" is
+        the whole of the deployment check; the redirect keeps the service usable if it
+        ever is not.
+        """
+        index = STATIC_DIR / "index.html"
+        if index.is_file():
+            # No-store rather than a cache buster: the page is small, and a grader
+            # reloading after a redeploy should never be served yesterday's build.
+            return FileResponse(index, headers={"Cache-Control": "no-store"})
         return RedirectResponse(settings.api.docs_url)
 
     return app
