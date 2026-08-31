@@ -118,6 +118,13 @@ with an error bar.
 
 ### Results on the provided contour map
 
+> **Superseded.** The table below is the prototype run, kept as the record of what was
+> planned. Its site 1 stood in the Shivnath, because ranking by catchment area alone asks
+> for the cell the most water passes through and on this sheet that cell is the river. A
+> watercourse rule was added afterwards and the answers moved. The current table, and the
+> check of the rule against the OpenStreetMap water layer, are in
+> [docs/METHODOLOGY.md](docs/METHODOLOGY.md) §3 and §5 Test C.
+
 | # | Outlet (lon, lat) | Catchment | Ensemble | Edge contact | Relief | Verdict |
 |---|---|---|---|---|---|---|
 | 1 | 81.286465, 21.240094 | 395.4 ha | 423.5 ± 17.6 ha | 1.3% | 27.0 m | best — 48% of map |

@@ -1,8 +1,8 @@
 """The application object: routes, CORS, error handlers, and nothing else.
 
-Kept deliberately thin. Everything a request touches lives one layer down --
-`routers/analyze.py` for the HTTP surface, `pipeline.py` for the wiring, `core/` for the
-analysis -- so this file is the place to see what the service *is*, not how it works.
+Kept deliberately thin. Everything a request touches lives one layer down.
+`routers/analyze.py` holds the HTTP surface, `pipeline.py` the wiring, `core/` the
+analysis. So this file is the place to see what the service is, not how it works.
 
 `/docs` is not decoration: the assignment's rubric asks for API documentation, and an
 OpenAPI schema generated from the same models that serialise the response cannot drift
@@ -32,24 +32,37 @@ when the server happens to start in the repo root is a page that is missing in
 production (PLAN Phase 11)."""
 
 DESCRIPTION = """
-Upload a contour map (KML/KMZ); get back a recommended village pond site, the catchment
-that drains to it, and the water that catchment yields in an average year.
+Send a contour map as KML or KMZ. Get back a village pond site, the ground that drains
+into it, and how much water that ground delivers in an average year.
 
-**How the catchment is found.** Every contour vertex is a known (x, y, z), so the contours
-interpolate to a DEM whose resolution follows the mean contour spacing. A NaN-aware
-Gaussian removes the stair-step artefact of that interpolation -- worth up to 12.8% of the
-catchment area against an analytic test case. Pits are filled by priority-flood, flow is
-routed D8, and the catchment is the set of cells that drain to the outlet.
+**How the catchment is found.** Every point on a contour line is a known height, so the
+contours interpolate to a grid whose cell size follows the spacing between the lines.
+The grid is then smoothed, because raw interpolation leaves flat stair steps instead of a
+hillside. Against a valley whose answer can be worked out on paper, the smoothing is
+worth up to 12.8% of the catchment area. Pits are filled, water is routed downhill one
+cell at a time, and the catchment is every cell that ends up at the outlet.
 
-**Why the area has an error bar.** The same site is delineated on three further grids
-(5.0 / 3.5 / 2.5 m). Grids that agree give a `high` confidence; grids that do not are
-reported as `low` and the site is flagged rather than recommended.
+**Why the site is not just the biggest basin.** The cell that the most water passes
+through is the river, and a pond does not go in a river. Any channel already draining more
+than 150 ha is treated as a watercourse, and a site has to stand 3 m above the one it
+drains into. Checked against the OpenStreetMap water layer over the sample sheet, this
+cuts candidate ground standing in the river from 12.8% to 1.2%.
 
-**Why the runoff is not the annual total.** SCS-CN is an event model. Applied to a year's
-rainfall as one storm it returns a 92% runoff coefficient; applied per rain day and summed
-it returns about 15%, which is what this terrain actually yields.
+**Why the area comes with an error bar.** The same site is traced again on three more
+grids at 5.0, 3.5 and 2.5 m. Grids that agree give `high` confidence. Grids that do not
+give `low`, and the site comes back flagged instead of recommended.
 
-Errors always return `{"status": "error", "code", "detail", "hint"}`.
+**Where the rainfall comes from.** Ten years of daily records for the site, read from
+Open-Meteo, which is free and needs no key. Send `rainfall_mm` to use your own gauge
+instead. If the weather service cannot be reached, a documented regional figure answers
+and the response says so.
+
+**Why the runoff is not just a share of the rain.** SCS-CN is an event model. Run it on a
+year of rain as one storm and it says 92% of it runs off, which no catchment does. Run it
+on each rain day and add the days up and it says about 8 to 16%, which is what this
+terrain gives.
+
+Errors always come back as `{"status": "error", "code", "detail", "hint"}`.
 """
 
 
@@ -89,9 +102,8 @@ def create_app() -> FastAPI:
     async def root() -> Response:
         """The demo page when it is there, the documentation when it is not.
 
-        Phase 10's page is a single static file with no build step, so "is it there" is
-        the whole of the deployment check; the redirect keeps the service usable if it
-        ever is not.
+        The page is one static file with no build step, so "is it there" is the whole of
+        the deployment check. The redirect keeps the service usable if it ever is not.
         """
         index = STATIC_DIR / "index.html"
         if index.is_file():
