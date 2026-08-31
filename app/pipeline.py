@@ -3,7 +3,7 @@
 `app/core/` holds seven modules that each do one thing and know nothing about HTTP. This
 is where they meet: bytes in, an `AnalysisResult` out. The route above it does validation
 and error mapping; the schemas beside it do presentation. Neither contains a step of the
-analysis, and nothing here knows what a status code is -- which is what makes the whole
+analysis, and nothing here knows what a status code is. That is what makes the whole
 pipeline runnable from a test, a notebook or a future CLI without a server (PLAN §6).
 
 Two decisions in here are worth the reader's attention.
@@ -15,8 +15,8 @@ would save a flow field and cost the resolution the methodology was validated at
 extra field is paid for deliberately (PLAN §3 Test C).
 
 **The triangulation is built once.** `ContourSurface` costs about a second on 159,113
-vertices and does not depend on the grid, so every grid -- the primary and all three
-ensemble members -- samples the same surface. Rebuilding it per grid would quadruple the
+vertices and does not depend on the grid, so every grid samples the same surface: the
+primary one and all three ensemble members. Rebuilding it per grid would quadruple the
 most expensive step in the request for no change in the answer.
 """
 
@@ -35,11 +35,7 @@ from app.core.hydrology import WaterBalance, water_balance
 from app.core.kml_parser import ContourSet, parse_contours
 from app.core.pond_siting import PondSite, PondSiteSelector, SitingResult
 from app.core.terrain import D8TerrainEngine, FlowField, TerrainEngine
-from app.providers.rainfall import (
-    DefaultRainfallProvider,
-    RainfallProvider,
-    RainfallSeries,
-)
+from app.providers.rainfall import RainfallProvider, RainfallSeries, rainfall_for
 from app.schemas.requests import AnalysisParams
 
 __all__ = ["AnalysisError", "AnalysisResult", "Stopwatch", "analyse"]
@@ -117,7 +113,7 @@ class AnalysisResult:
     and there was no search."""
 
     ensemble_resolutions_m: tuple[float, ...]
-    """Empty when the ensemble was switched off -- and then every site's confidence
+    """Empty when the ensemble was switched off. Every site's confidence then
     reads `unassessed`, which is the honest answer rather than a default of `high`."""
 
     warnings: tuple[str, ...]
@@ -125,7 +121,7 @@ class AnalysisResult:
 
     @property
     def recommended(self) -> PondSite:
-        """Rank 1. Not necessarily *recommendable* -- check `is_recommended`; a site the
+        """Rank 1, which is not the same as recommendable. Check `is_recommended`: a site the
         ensemble rejects keeps its rank and is returned flagged, never reordered away."""
         return self.sites[0]
 
@@ -185,8 +181,12 @@ def analyse(
 ) -> AnalysisResult:
     """Contour bytes to a complete answer.
 
-    Raises the core modules' structured errors unchanged -- `ContourParseError`,
-    `DEMBuildError`, `SitingError`, `HydrologyError`, `GeoJSONError` -- plus
+    `rainfall_provider` replaces the live feed rather than the fallback, so a test can
+    hand in a fixed series without reaching the network, and a caller-stated rainfall
+    figure still takes precedence over both.
+
+    Raises the core modules' structured errors unchanged. Those are `ContourParseError`,
+    `DEMBuildError`, `SitingError`, `HydrologyError` and `GeoJSONError`, plus
     `AnalysisError` for the one failure that belongs to the wiring rather than to a
     stage. The route turns each into a status code; none of them are caught here,
     because a partial analysis is not a useful thing to return.
@@ -231,15 +231,17 @@ def analyse(
 
     # ---- 6. Water ---------------------------------------------------- #
     with watch.stage("hydrology"):
-        provider = rainfall_provider or DefaultRainfallProvider(
-            config=cfg.hydrology,
+        # Rainfall is fetched for the *chosen site*, which is why this stage comes after
+        # siting rather than before it. A figure the caller stated wins; otherwise ten
+        # years of Open-Meteo records for that point answer, and the documented
+        # climatology stands behind both in case the service cannot be reached.
+        rainfall = rainfall_for(
+            *sites[0].lonlat,
             annual_total_mm=params.rainfall_mm,
             rain_days=params.rain_days,
+            live=rainfall_provider,
+            config=cfg.hydrology,
         )
-        # The provider takes the site's location because real rainfall depends on one.
-        # The default implementation ignores it and says so in its warnings; Phase 3's
-        # Open-Meteo provider will not.
-        rainfall = provider.daily_series(*sites[0].lonlat)
         balances = tuple(
             water_balance(
                 flow,
@@ -280,8 +282,8 @@ def _site_at(selector: PondSiteSelector, lon: float, lat: float) -> PondSite:
     """Delineate a client-named pour point, converting the delineator's `ValueError`.
 
     The bounding-box check above catches a point off the sheet; this catches the subtler
-    case of a point inside the box but on no-data -- a corner the contour hull does not
-    reach -- which is only knowable once the grid exists.
+    case of a point inside the box but on no data, such as a corner the contour hull
+    does not reach. That is only knowable once the grid exists.
     """
     try:
         return selector.site_at(lon, lat)
@@ -303,8 +305,8 @@ def _collect_warnings(
 ) -> tuple[str, ...]:
     """The caveats that apply to the answer as a whole.
 
-    Per-site caveats stay on their site -- a clipped catchment on alternative 3 says
-    nothing about the recommendation -- so only the recommended site's warnings are
+    Per-site caveats stay on their site, because a clipped catchment on alternative 3
+    says nothing about the recommendation. Only the recommended site's warnings are
     promoted here, alongside those of the file, the grid and the search.
     """
     messages: list[str] = []

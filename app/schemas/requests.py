@@ -7,7 +7,7 @@ parameter rejected at the door returns a `422` immediately instead of after the 
 that was never going to be usable.
 
 The bounds are read from `app.config` at validation time rather than baked into the field
-definitions, so a `POND_*` environment override -- or a test that narrows a range -- moves
+definitions. A `POND_*` environment override, or a test that narrows a range, therefore moves
 the API's contract with it. Nothing in this module invents a limit of its own; the two
 exceptions are the geographic bounds of lon/lat, which are facts about the planet rather
 than tunables.
@@ -15,6 +15,11 @@ than tunables.
 Defaults come from the same place and are resolved *eagerly*: by the time the pipeline
 sees an `AnalysisParams`, every field holds the value the analysis will actually use, so
 the response can echo the parameters back without guessing which of them were implied.
+
+Rainfall is the exception, and it has to be. `rainfall_mm` and `rain_days` stay null when
+the caller leaves them out, because what fills them is ten years of records for a location
+that is not known until the site is chosen. What the analysis actually used comes back
+under `recommended_site.runoff`, alongside the source it came from.
 """
 
 from __future__ import annotations
@@ -27,7 +32,7 @@ __all__ = ["AnalysisParams"]
 
 
 class AnalysisParams(BaseModel):
-    """The optional half of `POST /analyzeContour` -- everything except the file."""
+    """The optional half of `POST /analyzeContour`, which is everything except the file."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -54,16 +59,21 @@ class AnalysisParams(BaseModel):
         default_factory=lambda: settings.hydrology.default_curve_number,
         description="SCS curve number for the catchment's soil and land cover.",
     )
-    rainfall_mm: float = Field(
-        default_factory=lambda: settings.hydrology.default_annual_rainfall_mm,
-        description="Annual rainfall total in millimetres.",
+    rainfall_mm: float | None = Field(
+        default=None,
+        description=(
+            "Annual rainfall total in millimetres. Leave it out and the service fetches "
+            "ten years of daily records for the site from Open-Meteo, which is free and "
+            "needs no key. Set it and your figure is used instead."
+        ),
     )
-    rain_days: int = Field(
-        default_factory=lambda: settings.hydrology.default_rain_days,
+    rain_days: int | None = Field(
+        default=None,
         description=(
             "Number of days that rain falls on. SCS-CN is an event model: the total is "
             "spread over these days and runoff is summed per day, never applied to the "
-            "annual figure as one storm."
+            "annual figure as one storm. Left out, it comes from the same records as "
+            "`rainfall_mm`."
         ),
     )
     target_depth_m: float = Field(
@@ -112,15 +122,15 @@ class AnalysisParams(BaseModel):
 
     @field_validator("rainfall_mm")
     @classmethod
-    def _check_rainfall(cls, value: float) -> float:
-        if value <= 0:
+    def _check_rainfall(cls, value: float | None) -> float | None:
+        if value is not None and value <= 0:
             raise ValueError("rainfall_mm must be greater than zero.")
         return value
 
     @field_validator("rain_days")
     @classmethod
-    def _check_rain_days(cls, value: int) -> int:
-        if not 1 <= value <= 366:
+    def _check_rain_days(cls, value: int | None) -> int | None:
+        if value is not None and not 1 <= value <= 366:
             raise ValueError("rain_days must be between 1 and 366.")
         return value
 
@@ -157,7 +167,7 @@ class AnalysisParams(BaseModel):
     # ------------------------------------------------------------------ #
     @property
     def pour_point(self) -> tuple[float, float] | None:
-        """(lon, lat) if the client named a site, else `None` -- the flag the pipeline
+        """(lon, lat) if the client named a site, else `None`. This is the flag the pipeline
         branches on. Returned lon-first, the order every core function takes."""
         if self.lat is None or self.lon is None:
             return None

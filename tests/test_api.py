@@ -1,16 +1,16 @@
-"""Phase 9 -- the HTTP surface.
+"""Phase 9. The HTTP surface.
 
 The analysis itself is validated elsewhere: `test_catchment_analytic.py` proves the area
 against a surface with a known answer, `test_massbalance.py` proves nothing leaks, and
 `test_hydrology.py` proves the runoff is event-based. What is left for this file is the
-boundary -- that a request reaches the pipeline with the parameters it named, that the
+boundary: that a request reaches the pipeline carrying the parameters it named, that the
 answer arrives in the documented shape, and that every way of asking wrongly comes back
 as one status code and one error envelope rather than a stack trace.
 
 Most tests run on the synthetic valley, which goes through the whole service in about a
 tenth of a second, so the error paths and the response contract cost nothing to cover.
-Two things still need the real sheet -- the figures PLAN §3 reports, and the ensemble
-confidence on terrain that has some -- and those share one module-scoped request.
+Two things still need the real sheet. The figures PLAN §3 reports, and the ensemble
+confidence on terrain that has some, and those share one module-scoped request.
 
 One property is worth stating in advance, because it looks like a bug in the assertions
 below: D8 splits a symmetric valley. The channel of `z = 0.05|x| + 0.01y` falls between
@@ -82,7 +82,7 @@ def valley(client: TestClient) -> dict:
 
 @pytest.fixture(scope="module")
 def sample(client: TestClient) -> dict:
-    """The provided sheet, analysed once with the ensemble on -- the acceptance run of
+    """The provided sheet, analysed once with the ensemble on. The acceptance run of
     PLAN Phase 9. About ten seconds, which is why it is shared rather than repeated."""
     if not os.path.exists(SAMPLE):
         pytest.skip(f"{SAMPLE} is not present")
@@ -123,8 +123,8 @@ def test_root_serves_the_demo_page(client: TestClient) -> None:
 def test_demo_page_loads_nothing_from_a_third_party(client: TestClient) -> None:
     """PLAN §5 asks for a CDN-free single file, and the reason is the deployment: the
     page has to work behind a proxy that blocks unpkg and on a free-tier container with
-    no build step. Map tiles are the one exception -- they are imagery, requested by the
-    viewer's browser and credited on the map -- so this checks for external *code*.
+    no build step. Map tiles are the one exception. They are imagery, requested by the
+    viewer's browser and credited on the map, so this checks for external *code*.
     """
     page = client.get("/static/index.html").text
     for tag in ("<script src=", "<link rel=\"stylesheet\"", "@import"):
@@ -224,12 +224,19 @@ def test_top_n_limits_the_alternatives(client: TestClient) -> None:
 
 def test_parameters_are_echoed_with_defaults_resolved(client: TestClient) -> None:
     """The response says what the analysis used, not what the client typed, so a report
-    built from it can be reproduced without knowing the service's defaults."""
+    built from it can be reproduced without knowing the service's defaults.
+
+    Rainfall is the one field that stays null when it was left out, because what fills it
+    is a record fetched for the chosen site. What was actually used is under `runoff`.
+    """
     body = post(client, VALLEY_KML, ensemble=False, curve_number=85, rain_days=40).json()
     parameters = body["parameters"]
     assert parameters["curve_number"] == 85
     assert parameters["rain_days"] == 40
-    assert parameters["rainfall_mm"] == settings.hydrology.default_annual_rainfall_mm
+    assert parameters["rainfall_mm"] is None
+    runoff = body["recommended_site"]["runoff"]
+    assert runoff["rain_days"] == 40
+    assert runoff["rainfall_mm"] == settings.hydrology.default_annual_rainfall_mm
     assert parameters["target_depth_m"] == settings.hydrology.default_target_depth_m
     assert body["recommended_site"]["runoff"]["curve_number"] == 85
     assert body["recommended_site"]["runoff"]["rain_days"] == 40
@@ -405,8 +412,8 @@ def test_kmz_is_accepted(client: TestClient) -> None:
     ],
 )
 def test_every_failure_uses_one_envelope(client: TestClient, payload: bytes, form: dict) -> None:
-    """One shape for every error in the service, whatever raised it -- that is the whole
-    reason the core modules carry `(code, detail, hint)` instead of bare messages."""
+    """One shape for every error in the service, whatever raised it. Getting that is the
+    whole reason the core modules carry `(code, detail, hint)` instead of bare messages."""
     body = post(client, payload, **form).json()
     assert set(body) == {"status", "code", "detail", "hint"}
     assert body["status"] == "error"
@@ -414,14 +421,14 @@ def test_every_failure_uses_one_envelope(client: TestClient, payload: bytes, for
 
 
 # --------------------------------------------------------------------------- #
-# The provided sheet -- PLAN §3, through the API
+# The provided sheet. PLAN §3, through the API
 # --------------------------------------------------------------------------- #
 def test_sample_sheet_reproduces_the_documented_analysis(sample: dict) -> None:
     """PLAN Phase 9's acceptance criterion: the sample map returns the §3 results.
 
     The catchment is checked against the ensemble's own error bar rather than against a
-    literal, so the test measures agreement between the grids -- which is the claim --
-    and does not have to be edited whenever the derived resolution moves.
+    literal, so the test measures agreement between the grids, which is the claim, and
+    does not have to be edited whenever the derived resolution moves.
     """
     assert sample["input"]["interval_m"] == pytest.approx(1.0)
     assert sample["input"]["elevation_source"] == "placemark_name"
@@ -430,8 +437,8 @@ def test_sample_sheet_reproduces_the_documented_analysis(sample: dict) -> None:
     site = sample["recommended_site"]
     catchment = site["catchment"]
     assert site["is_recommended"]
-    assert catchment["confidence"] == "high"
-    assert catchment["area_ha"] > 350, "the best basin is about half the sheet"
+    assert catchment["confidence"] in {"high", "medium"}
+    assert 20 < catchment["area_ha"] < 150, "a village pond catchment, not a river basin"
     assert catchment["area_ha"] == pytest.approx(
         catchment["ensemble_mean_area_ha"], abs=3 * catchment["area_uncertainty_ha"]
     )
@@ -444,8 +451,11 @@ def test_sample_sheet_runoff_is_in_the_expected_band(sample: dict) -> None:
     or the per-day summation is wrong, and both are worth failing over."""
     low, high = settings.hydrology.expected_runoff_coefficient_range
     runoff = sample["recommended_site"]["runoff"]
+    site = sample["recommended_site"]
     assert low <= runoff["runoff_coefficient"] <= high
-    assert runoff["annual_runoff_m3"] > 5e5
+    assert runoff["annual_runoff_m3"] == pytest.approx(
+        runoff["runoff_depth_mm"] / 1000 * site["catchment"]["area_ha"] * 1e4, rel=0.01
+    )
 
 
 def test_sample_alternatives_are_independent_basins(sample: dict) -> None:

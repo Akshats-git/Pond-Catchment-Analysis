@@ -1,20 +1,20 @@
 """The HTTP surface: read the request, run the pipeline, map the failures.
 
-No analysis happens here. The route's whole job is the boundary -- turn a multipart body
+No analysis happens here. The route's whole job is the boundary: turn a multipart body
 into an `AnalysisParams`, hand it to `app.pipeline.analyse`, and turn whatever comes back
 (an answer or one of the core modules' structured errors) into a status code.
 
 **Error mapping is a table, not a chain of `except`s.** Every core module raises the same
 `(code, detail, hint)` triple, and `_STATUS_BY_CODE` says what each code means over HTTP.
 A new failure mode in `app/core/` therefore needs one line here, and until it gets one it
-falls back to `400` -- an unrecognised code means the request could not be analysed, which
+falls back to `400`. An unrecognised code means the request could not be analysed, which
 is the honest default. The three groups:
 
-* **400** -- the file cannot yield an answer: unparseable XML, no contour lines, no
+* **400** for a file that cannot yield an answer: unparseable XML, no contour lines, no
   resolvable elevations, degenerate geometry.
-* **413** -- too much data: over the upload limit, or a sheet that needs more cells than
+* **413** for too much data: over the upload limit, or a sheet that needs more cells than
   the service will allocate even at its coarsest grid.
-* **422** -- the request was understood but cannot be fulfilled as asked: a parameter out
+* **422** for a request understood but impossible as asked: a parameter out
   of range, a pour point off the sheet, or a sheet on which the siting rules find no
   candidate at all. The last of those is not a malformed request, but it is the same
   thing to a client: nothing about the file changes, and only a different ask can help.
@@ -22,14 +22,14 @@ is the honest default. The three groups:
 **The analysis runs in a worker thread.** It is several seconds of numpy with the GIL
 held in places, and blocking the event loop would stall every other request including
 `/health`. `anyio.fail_after` bounds how long a client waits; it cannot interrupt numpy
-mid-array, so the thread finishes on its own -- the timeout is a promise to the caller,
+mid-array, so the thread finishes on its own. The timeout is a promise to the caller,
 not a kill switch, and it is documented as such rather than overstated.
 """
 
 from __future__ import annotations
 
 import anyio
-from fastapi import APIRouter, File, Form, UploadFile, status
+from fastapi import APIRouter, File, Form, Query, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from pydantic import ValidationError
 
@@ -41,8 +41,15 @@ from app.core.kml_parser import ContourParseError
 from app.core.pond_siting import SitingError
 from app.errors import APIError
 from app.pipeline import AnalysisError, analyse
+from app.providers.rainfall import rainfall_for
 from app.schemas.requests import AnalysisParams
-from app.schemas.responses import AnalysisResponse, ErrorResponse, analysis_response
+from app.schemas.responses import (
+    AnalysisResponse,
+    ErrorResponse,
+    RainfallResponse,
+    analysis_response,
+    rainfall_response,
+)
 
 __all__ = ["router"]
 
@@ -51,10 +58,10 @@ router = APIRouter(tags=["analysis"])
 _ACCEPTED_SUFFIXES = (".kml", ".kmz")
 
 _STATUS_BY_CODE: dict[str, int] = {
-    # 413 -- more data than the service will take on.
+    # 413 for more data than the service will take on.
     "file_too_large": status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
     "sheet_too_large": status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-    # 422 -- the ask, not the file.
+    # 422 for a problem with the ask rather than the file.
     "invalid_resolution": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "curve_number_out_of_range": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "bad_target_depth": status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -64,6 +71,7 @@ _STATUS_BY_CODE: dict[str, int] = {
     "pour_point_unusable": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "no_stream_network": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "no_buildable_ground": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "no_ground_clear_of_watercourse": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "no_site_found": status.HTTP_422_UNPROCESSABLE_ENTITY,
 }
 """Codes that are not 400. Everything else the core raises is a file that cannot be
@@ -78,7 +86,7 @@ _ANALYSIS_ERRORS = (
     AnalysisError,
 )
 """Every structured error the pipeline can raise. They share the `(code, detail, hint)`
-shape by construction, not by coincidence -- see each module's error class."""
+shape by construction and not by coincidence. See each module's error class."""
 
 _RESPONSES: dict[int | str, dict] = {
     400: {"model": ErrorResponse, "description": "The file cannot be analysed."},
@@ -92,7 +100,7 @@ async def _read_upload(file: UploadFile) -> bytes:
     """Read the body, stopping as soon as it passes the limit.
 
     Starlette has already spooled the upload to a temp file by the time the route runs,
-    so this cannot refuse the transfer -- what it refuses is materialising an oversized
+    so this cannot refuse the transfer. What it refuses is materialising an oversized
     file as one `bytes` object and handing it to the parser. Chunked, so an upload ten
     times the limit costs one chunk of memory rather than ten times the limit.
     """
@@ -166,33 +174,44 @@ def _extension_warning(filename: str) -> str | None:
 )
 async def analyze_contour(
     file: UploadFile = File(
-        ..., description="Contour map as .kml or .kmz. Lines, not point labels."
+        ..., description="Contour map as .kml or .kmz. Contour lines, not point labels."
     ),
     grid_resolution: float | None = Form(
-        None, description="DEM cell size in metres. Omit to derive it from the contours."
+        None, description="Grid cell size in metres. Leave it out and the contour spacing\n        sets it."
     ),
-    top_n: int | None = Form(None, description="How many independent basins to return."),
-    lat: float | None = Form(None, description="Explicit pour point latitude."),
-    lon: float | None = Form(None, description="Explicit pour point longitude."),
-    curve_number: float | None = Form(None, description="SCS curve number."),
-    rainfall_mm: float | None = Form(None, description="Annual rainfall in millimetres."),
-    rain_days: int | None = Form(None, description="Days that rain falls on."),
-    target_depth_m: float | None = Form(None, description="Pond depth in metres."),
+    top_n: int | None = Form(None, description="How many separate basins to return."),
+    lat: float | None = Form(None, description="Latitude of a spot you have chosen yourself."),
+    lon: float | None = Form(None, description="Longitude of that spot. Send it with lat."),
+    curve_number: float | None = Form(
+        None, description="SCS curve number, 30 to 98. How readily this ground sheds rain."
+    ),
+    rainfall_mm: float | None = Form(
+        None,
+        description="Yearly rainfall in millimetres. Leave it out and ten years of "
+        "Open-Meteo records for the site fill it in.",
+    ),
+    rain_days: int | None = Form(None, description="Days a year that rain falls on."),
+    target_depth_m: float | None = Form(None, description="How deep to build the pond, in metres."),
     ensemble: bool | None = Form(
         None, description="Cross-check each site on three grids. Slower, and honest."
     ),
 ) -> AnalysisResponse:
-    """Upload a contour map; get back where the pond goes, what drains to it, and how
+    """Send a contour map. Get back where the pond goes, what drains into it, and how
     much water that is worth in an average year.
 
-    The catchment is delineated by D8 steepest descent on a DEM interpolated from the
-    contours, and -- unless `ensemble=false` -- cross-checked on three further grids so
-    the area comes with an error bar rather than a false precision. Siting is
-    catchment-first: the largest independent basins on buildable, low-slope ground.
-    Runoff is SCS-CN applied per rain day and summed, never to the annual total as one
-    storm, which overstates the yield about sixfold.
+    The catchment is traced by steepest descent on a grid built from the contour lines.
+    Unless you send `ensemble=false` it is traced again on three more grids, so the area
+    arrives with an error bar instead of a false precision.
 
-    Pass `lat` and `lon` together to analyse a site you have already chosen instead.
+    Sites are ranked by how much ground drains into them, on buildable low-slope land,
+    and each site has to stand 3 m above any channel already draining more than 150 ha.
+    That last rule is what keeps the answer out of the river.
+
+    Runoff is SCS-CN worked out for each rain day and added up. Never for the whole year
+    as one storm, which overstates the yield about sixfold. Rainfall comes from ten years
+    of Open-Meteo records for the site unless you send a figure of your own.
+
+    Send `lat` and `lon` together to analyse a spot you have already chosen instead.
     """
     params = _params(
         {
@@ -235,6 +254,31 @@ async def analyze_contour(
     return response
 
 
+@router.get(
+    "/rainfall",
+    response_model=RainfallResponse,
+    responses={422: {"model": ErrorResponse, "description": "Coordinates out of range."}},
+    summary="Rainfall for a point, from the free Open-Meteo archive",
+    tags=["analysis"],
+)
+async def rainfall(
+    lat: float = Query(..., description="Latitude in degrees.", ge=-90.0, le=90.0),
+    lon: float = Query(..., description="Longitude in degrees.", ge=-180.0, le=180.0),
+) -> RainfallResponse:
+    """Ten years of daily rainfall records for one point, averaged to a year.
+
+    The same feed `/analyzeContour` uses when no rainfall figure is given, exposed on its
+    own so a client can show the number before committing to an analysis. The demo page
+    calls this as soon as a pour point is dropped, which is why the rainfall box on it
+    fills itself in.
+
+    Never fails on a rainfall service that is down. It answers with the documented
+    regional climatology instead, `is_measured` false, and the reason in `warnings`.
+    """
+    series = await run_in_threadpool(rainfall_for, lon, lat)
+    return rainfall_response(series, lon, lat)
+
+
 @router.post(
     "/findCatchment",
     response_model=AnalysisResponse,
@@ -254,9 +298,9 @@ async def find_catchment(
     target_depth_m: float | None = Form(None),
     ensemble: bool | None = Form(None),
 ) -> AnalysisResponse:
-    """The name the assignment brief uses. Same request, same response, one
-    implementation -- hidden from the schema so `/docs` documents one endpoint rather
-    than two identical ones."""
+    """The name the assignment brief uses. Same request, same response, one piece of
+    code behind both. Hidden from the schema so `/docs` shows one endpoint and not two
+    identical ones."""
     return await analyze_contour(
         file=file,
         grid_resolution=grid_resolution,

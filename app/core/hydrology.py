@@ -3,13 +3,13 @@
 **Runoff.** SCS-CN is an *event* model. Applied to a year's rainfall as a single 1200 mm
 storm it returns a 92% runoff coefficient, which no catchment on earth produces; applied
 per rain day and summed it returns 16%, which is what this terrain does (PLAN §4). Both
-numbers are computed here -- the wrong one deliberately, because a report that only shows
+numbers are computed here. The wrong one is deliberate, because a report that only shows
 the right answer cannot show why it is right.
 
 **Storage.** The stage-storage curve is integrated from the DEM, not assumed from a
 shape. At each stage the pond is every cell the water reaches from the outlet without
 crossing ground that stands above it, and the depth of each of those cells is measured
-against the surveyed surface -- so a hollow inside the pond counts as the water it holds.
+against the surveyed surface, so a hollow inside the pond counts as the water it holds.
 At stage zero that integral is the water the untouched ground keeps; every stage above it
 is held by works.
 
@@ -18,7 +18,7 @@ multiplies the water surface, the pond has topped a divide, and the volume below
 is the pond the site really holds: on the sample's best site, 8,000 m^3 over 0.8 ha at
 2.75 m against 616,000 m^3 over 29 ha a quarter of a metre higher. The frustum formula a
 spreadsheet would use is reported beside the integral as a cross-check, and underestimates
-it by 26-65% across the sample's five sites -- real ground widens as it rises faster than
+it by 26-65% across the sample's five sites. Real ground widens as it rises faster than
 straight sides do, which is the whole argument for integrating.
 
 The pond's depth comes from the *target depth* and the terrain, never from the depression
@@ -27,7 +27,7 @@ the best site on the sheet would be an artefact of the model rather than a fact 
 ground (PLAN §11 / Phase 7).
 
 **Time of concentration.** Kirpich, on the longest flow path and the drop along *that*
-path -- not the basin's overall relief, which belongs to a different, usually steeper,
+path. Not the basin's overall relief, which belongs to a different and usually steeper
 line down the hill.
 """
 
@@ -84,16 +84,20 @@ class RunoffResult:
     """S = 25400/CN - 254: the depth of water the soil can still absorb when dry."""
 
     initial_abstraction_mm: float
-    """Ia = 0.2 S -- rain that wets the ground before any of it runs off."""
+    """Ia = 0.2 S. The rain that wets the ground before any of it runs off."""
 
     rainfall_mm: float
+    """Rainfall in an average year. A multi-year record is divided by its span."""
+
     rain_days: int
+    """Rain days in an average year, on the same division."""
+
     runoff_depth_mm: float
-    """Sum of the per-day runoff depths. The number that is right."""
+    """Sum of the per-day runoff depths, per year. The number that is right."""
 
     runoff_coefficient: float
     contributing_days: int
-    """Days that produced any runoff at all -- the rest never exceeded Ia."""
+    """Days that produced any runoff at all. The rest never got past Ia."""
 
     single_event_depth_mm: float
     single_event_coefficient: float
@@ -119,8 +123,10 @@ def retention_mm(curve_number: float, *, config: HydrologyConfig | None = None) 
     if not low <= curve_number <= high:
         raise HydrologyError(
             "curve_number_out_of_range",
-            f"Curve number {curve_number} is outside the defined range {low}-{high}.",
-            "CN 30 is dry sand under forest; CN 98 is impervious pavement.",
+            f"A curve number of {curve_number} has no meaning. It has to be between "
+            f"{low:g} and {high:g}.",
+            "30 is dry sand under forest. 98 is sealed pavement. Cultivated village land "
+            "is usually 65 to 86.",
         )
     return 25400.0 / curve_number - 254.0
 
@@ -138,14 +144,26 @@ def scs_cn_runoff(
     Applied to each day and summed. The quadratic numerator is why the aggregation order
     matters so much: runoff grows faster than rainfall, so one 100 mm day yields far more
     than ten 10 mm days, and a year treated as one storm yields more than either.
+
+    A series covering several years is summed the same way and divided by the number of
+    years at the end, which makes the answer the mean of the annual runoffs. Averaging the
+    years into one synthetic year first would flatten the big days, and the big days are
+    most of the runoff.
     """
     cfg = config or settings.hydrology
     cn = cfg.default_curve_number if curve_number is None else float(curve_number)
+    years = 1.0
+    if isinstance(daily_rainfall_mm, RainfallSeries):
+        years = float(daily_rainfall_mm.years)
     series = (
         daily_rainfall_mm.daily_mm
         if isinstance(daily_rainfall_mm, RainfallSeries)
         else np.asarray(daily_rainfall_mm, dtype=np.float64)
     )
+    if years <= 0:
+        raise HydrologyError(
+            "bad_rainfall_series", "A rainfall series must cover a positive span."
+        )
     if series.ndim != 1:
         raise HydrologyError(
             "bad_rainfall_series",
@@ -166,8 +184,10 @@ def scs_cn_runoff(
         return np.where(excess > 0, excess ** 2 / (excess + retention), 0.0)
 
     per_day = runoff(series)
-    total_rain = float(series.sum())
-    depth = float(per_day.sum())
+    # Everything reported is per year: a ten-year record answers the same question a
+    # one-year one does, just with less of the year-to-year luck in it.
+    total_rain = float(series.sum()) / years
+    depth = float(per_day.sum()) / years
     single = float(runoff(np.array([total_rain]))[0])
 
     return RunoffResult(
@@ -175,10 +195,10 @@ def scs_cn_runoff(
         retention_mm=retention,
         initial_abstraction_mm=abstraction,
         rainfall_mm=total_rain,
-        rain_days=int(series.size),
+        rain_days=int(round(series.size / years)),
         runoff_depth_mm=depth,
         runoff_coefficient=depth / total_rain if total_rain else 0.0,
-        contributing_days=int((per_day > 0).sum()),
+        contributing_days=int(round(int((per_day > 0).sum()) / years)),
         single_event_depth_mm=single,
         single_event_coefficient=single / total_rain if total_rain else 0.0,
     )
@@ -197,7 +217,7 @@ def time_of_concentration_min(
 ) -> float:
     """Kirpich (1940): Tc = 0.01947 * L^0.77 * S^-0.385, in minutes.
 
-    `length_m` and `relief_m` are the longest flow path and the drop *along it* -- the
+    `length_m` and `relief_m` are the longest flow path and the drop along that path. The
     pair `Catchment` reports together for exactly this reason. Using the basin's overall
     relief instead would shorten Tc by about a fifth on the sample's largest basin, since
     the highest ground is not the most distant.
@@ -240,7 +260,7 @@ class StageStorage:
 
     natural_storage_m3: float
     """Volume at stage 0: the water the site holds with nothing built, counting only the
-    ground above the outlet -- the half of any hollow a structure at the outlet keeps.
+    ground above the outlet, which is the half of any hollow a structure at the outlet keeps.
     Zero on a channel, which is where catchment-first siting puts most sites; those ponds
     are dug or bunded, and every stage above 0 comes from the target depth against the
     surrounding ground, never from the depression depth (PLAN §11)."""
@@ -249,8 +269,8 @@ class StageStorage:
 
     site_depression_m3: float
     """The whole natural hollow the site sits in, both sides of the outlet, filled to its
-    spill level. `natural_storage_m3` counts only the upstream half -- the half a bund at
-    the outlet would keep -- but the hollow is what a surveyor standing there would see,
+    spill level. `natural_storage_m3` counts only the upstream half, which is the half a
+    bund at the outlet would keep, but the hollow is what a surveyor standing there sees,
     and PLAN §3 reports it for site 3 of the sample (7,400 m^3)."""
 
     site_depression_area_m2: float
@@ -271,11 +291,11 @@ class StageStorage:
     large share of the ground that feeds it is a reservoir, and is flagged as one."""
 
     pond_mask: np.ndarray
-    """(ny, nx) bool -- the water surface of the pond at its usable stage, which is what
+    """(ny, nx) bool. The water surface of the pond at its usable stage, which is what
     Phase 8 draws as the pond footprint."""
 
     spill_stage_index: int | None
-    """Index of the stage at which the water first tops a divide and spreads -- the step
+    """Index of the stage at which the water first tops a divide and spreads. The step
     where the surface area jumps by more than `spill_area_jump_factor`. None when the pond
     fills to the target depth without spilling."""
 
@@ -297,7 +317,7 @@ class StageStorage:
         """Capacity below the spill: the pond a village would actually build here.
 
         Equal to `capacity_m3` where the water never tops a divide. Where it does, the
-        difference is large -- 4,600 m^3 against 616,000 m^3 on the sample's best site --
+        difference is large, 4,600 m^3 against 616,000 m^3 on one site of the sample,
         and reporting only the second would describe a reservoir the site cannot hold.
         """
         index = -1 if self.spill_stage_index is None else self.spill_stage_index
@@ -334,8 +354,8 @@ def _pool_at(
     ground above it.
 
     Tested on the surveyed surface rather than the depression-filled one. The filled
-    surface would be the tidier choice -- it cannot be cut in two by a one-cell artefact
-    rim -- but priority-flood raises each step across a flat by an epsilon, so a filled
+    surface would be the tidier choice, since it cannot be cut in two by a one-cell
+    artefact rim, but priority-flood raises each step across a flat by an epsilon, so a filled
     depression's surface is a staircase, and thresholding it puts the pond at stage 0 in
     the outlet cell alone. The surveyed surface has no such staircase, and "water does not
     climb over ground that stands above it" is the physical rule anyway.
@@ -390,12 +410,12 @@ def stage_storage(
 
     # The site's hollow, unbounded by the catchment: the same water body, but counting the
     # half below the outlet as well as the half above it. Defined as the ground that
-    # priority-flood had to raise, which is self-bounding -- flooding "everything below the
+    # priority-flood had to raise, which is self-bounding. Flooding "everything below the
     # spill level" instead would run away down the valley, where the ground is lower still.
     hollow = _component((flow.filled > dem.z) & dem.valid, outlet)
     hollow_water = np.where(hollow, flow.filled - np.where(dem.nodata, 0.0, dem.z), 0.0)
 
-    # Straight sides from bed to water surface -- the shape a spreadsheet assumes.
+    # Straight sides from bed to water surface, the shape a spreadsheet assumes.
     frustum = (
         depth / 3.0 * (surface + areas[0] + math.sqrt(max(surface * areas[0], 0.0)))
     )
@@ -404,7 +424,7 @@ def stage_storage(
     # The first step that multiplies the water surface by more than the documented factor
     # is the pond topping a divide; below it the water is held by the basin itself. A pool
     # still smaller than one contour spacing squared is a puddle in a couple of cells, and
-    # every step multiplies one of those -- so a jump only counts once the pond is at least
+    # every step multiplies one of those, so a jump only counts once the pond is at least
     # as large as the ground the DEM can resolve.
     resolvable_m2 = dem.meta.mean_contour_spacing_m ** 2
     spill_index: int | None = None
@@ -426,31 +446,32 @@ def stage_storage(
     warnings: list[str] = []
     if excavated:
         warnings.append(
-            "The site has no natural depression; the whole capacity has to be excavated "
-            f"or bunded to the {depth:.1f} m target depth."
+            "There is no natural hollow here. All of the capacity has to be dug out or "
+            f"bunded to reach the {depth:.1f} m depth asked for."
         )
     elif natural <= cfg.natural_storage_floor_m3:
         warnings.append(
-            f"The {depression_volume:,.0f} m3 hollow at this site lies below the outlet "
-            "cell, so a structure here retains almost none of it."
+            f"The {depression_volume:,.0f} m3 hollow here sits below the outlet, so a "
+            "structure built at the outlet would keep almost none of it."
         )
     if spill_index is not None:
         warnings.append(
-            f"The water tops a divide between {stages[spill_index]:.2f} m and "
-            f"{stages[spill_index + 1]:.2f} m, spreading from "
-            f"{areas[spill_index] / 1e4:.2f} ha to {areas[spill_index + 1] / 1e4:.1f} ha. "
-            f"The pond this site holds is the {volumes[spill_index]:,.0f} m3 below that."
+            f"Somewhere between {stages[spill_index]:.2f} m and "
+            f"{stages[spill_index + 1]:.2f} m the water tops a ridge and runs away sideways. "
+            f"The surface jumps from {areas[spill_index] / 1e4:.2f} ha to "
+            f"{areas[spill_index + 1] / 1e4:.1f} ha. The pond this site really holds is the "
+            f"{volumes[spill_index]:,.0f} m3 below that point."
         )
     if spread > cfg.water_spread_warn_fraction:
         warnings.append(
-            f"At {depth:.1f} m the water spreads over {spread:.0%} of the catchment "
-            f"({surface / 1e4:.1f} ha). That is a reservoir rather than a pond -- a "
-            "shallower structure, or a smaller excavated pond, suits this site better."
+            f"At {depth:.1f} m the water covers {spread:.0%} of the catchment that feeds "
+            f"it, which is {surface / 1e4:.1f} ha. That is a reservoir and not a village "
+            "pond. Try a shallower structure or a smaller dug pond here."
         )
     if dem.meta.contour_interval_m:
         warnings.append(
-            f"Depths are quantised to the {dem.meta.contour_interval_m:.1f} m contour "
-            "interval of the source map."
+            f"The source map draws a contour every {dem.meta.contour_interval_m:.1f} m, so "
+            "read every depth here as accurate to about that much and no better."
         )
 
     return StageStorage(
@@ -487,7 +508,7 @@ class WaterBalance:
     catchment_area_m2: float
     annual_runoff_m3: float
     fill_ratio: float
-    """Annual runoff divided by the pond's usable capacity -- the volume below the stage
+    """Annual runoff divided by what the pond really holds, which is the volume below the stage
     at which the water tops a divide, since that is the pond the site actually holds.
     Above 1 the pond fills and spills in an average year; below 1 it never fills."""
 
@@ -502,23 +523,24 @@ class WaterBalance:
 
 
 def _assess(ratio: float, cfg: HydrologyConfig) -> str:
-    """The fill ratio in plain English -- the sentence a village officer reads."""
+    """The fill ratio in plain English. This is the sentence a village officer reads."""
     dry, marginal, ample = cfg.fill_ratio_bands
     if ratio < dry:
         return (
-            "The catchment cannot fill the pond in an average year; a smaller pond, or a "
-            "site with more upstream area, would hold water more reliably."
+            "In an average year the catchment does not bring enough water to fill this "
+            "pond. A smaller pond would hold water more reliably, or a site with more "
+            "ground draining into it."
         )
     if ratio < marginal:
         return (
-            "The catchment just fills the pond in an average year, with little margin in "
-            "a dry one."
+            "The catchment just fills the pond in an average year. A dry year would "
+            "leave it short."
         )
     if ratio < ample:
-        return "The catchment comfortably fills the pond in an average year."
+        return "The catchment fills the pond comfortably in an average year."
     return (
-        "The catchment yields far more runoff than the pond can hold -- it fills early in "
-        "the monsoon and spills, so the spillway matters more than the capacity."
+        "Far more water arrives than the pond can hold. It fills early in the monsoon and "
+        "then spills, so the spillway matters more here than the capacity does."
     )
 
 
@@ -546,13 +568,14 @@ def water_balance(
     low, high = cfg.expected_runoff_coefficient_range
     if not low <= runoff.runoff_coefficient <= high:
         warnings.append(
-            f"Runoff coefficient {runoff.runoff_coefficient:.0%} is outside the "
-            f"{low:.0%}-{high:.0%} range expected for this terrain; check the curve "
-            "number and the rainfall series."
+            f"{runoff.runoff_coefficient:.0%} of the rain runs off here, and this terrain "
+            f"normally gives {low:.0%} to {high:.0%}. Check the curve number and the "
+            "rainfall before using the figures below."
         )
     if catchment.is_lower_bound:
         warnings.append(
-            "The catchment area is a lower bound, so the runoff volume is too."
+            "The catchment runs off the edge of the map, so its area is a floor. The "
+            "water arriving is a floor for the same reason."
         )
 
     return WaterBalance(
