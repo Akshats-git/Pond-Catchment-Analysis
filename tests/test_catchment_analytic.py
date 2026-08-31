@@ -1,4 +1,4 @@
-"""Phase 5 -- validating the catchment calculation against answers known in advance.
+"""Phase 5. Validating the catchment calculation against answers known in advance.
 
 Everything else in this repository checks the pipeline against itself or against the one
 sample sheet. This file checks it against arithmetic, and it is the evidence behind every
@@ -7,7 +7,7 @@ number the service reports.
 Three claims are made here.
 
 1. **The delineation is right.** On a valley whose catchment area can be derived on paper,
-   the pipeline reproduces it to within one grid row -- and exactly, to the cell, whenever
+   the pipeline reproduces it to within one grid row, and exactly, to the cell, whenever
    the outlet sits on a contour line.
 
 2. **The smoothing earns its place.** Turning it off makes the same measurement wrong by
@@ -47,7 +47,7 @@ def delineate(surface: ContourSurface, resolution: float, y: float, *, smooth: b
     """Run the full pipeline and return the catchment of the channel at `y`.
 
     Snapping is off on purpose. The point is on the channel by construction, and snapping
-    moves an outlet to the largest accumulation within the search radius -- which, on a
+    moves an outlet to the largest accumulation within the search radius, which, on a
     channel, is always downstream. That would measure the snap, not the delineation.
     """
     dem = surface.sample(resolution, smooth=smooth)
@@ -65,7 +65,7 @@ def missing_cells(catchment, y: float, resolution: float) -> int:
 
     Counted in *cells*, not square metres. Cell areas are latitude-weighted, so even a
     perfect catchment misses the continuum area by a few square metres out of half a
-    million -- an artefact of the projection, not of the routing, and one that would
+    million. An artefact of the projection, not of the routing, and one that would
     disguise the thing being measured.
     """
     return expected_cells(y, resolution) - catchment.cell_count
@@ -117,13 +117,13 @@ def test_the_whole_domain_is_mapped(valley_surface):
 
 
 # --------------------------------------------------------------------------- #
-# Test A -- the analytic answer
+# Test A. The analytic answer
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("y", TEST_POINTS)
 def test_analytic_catchment_area_at_five_metres(valley_surface, y):
     """PLAN §3 Test A. The catchment is right to within one grid row of the outlet.
 
-    One row is 5,000 m^2 at this resolution -- a sub-cell error in placing the outlet
+    One row is 5,000 m^2 at this resolution. A sub-cell error in placing the outlet
     along a flat interpolated band, not a routing failure. The absolute discrepancy is the
     same at every Y; only the percentage moves, because the catchment shrinks.
     """
@@ -134,7 +134,7 @@ def test_analytic_catchment_area_at_five_metres(valley_surface, y):
 @pytest.mark.parametrize("y", ON_CONTOUR_POINTS)
 def test_the_answer_is_exact_when_the_outlet_sits_on_a_contour(valley_surface, y):
     """No tolerance at all. When the outlet cell coincides with a contour vertex there is
-    no interpolated flat band to misplace it on, and the catchment is exactly right --
+    no interpolated flat band to misplace it on, and the catchment is exactly right.
     every one of 30,000 cells, counted."""
     catchment, _ = delineate(valley_surface, 5.0, y)
     assert missing_cells(catchment, y, 5.0) == 0
@@ -147,7 +147,7 @@ def test_analytic_catchment_area_at_ten_metres(valley_surface, y):
 
     Sigma is tied to the contour spacing, so it is fixed in metres: 2.46 m is half a cell
     at 5 m but a quarter of a cell at 10 m, and a quarter-cell Gaussian barely touches the
-    stair-steps. The error grows to a few rows accordingly -- worth pinning, because it is
+    stair-steps. The error grows to a few rows accordingly. Worth pinning, because it is
     the argument for deriving the resolution from the data rather than accepting one.
     """
     catchment, _ = delineate(valley_surface, 10.0, y)
@@ -157,7 +157,7 @@ def test_analytic_catchment_area_at_ten_metres(valley_surface, y):
 @pytest.mark.parametrize("y", TEST_POINTS)
 def test_the_catchment_never_over_reports(valley_surface, y):
     """Every error seen is a *missing* row, never a spurious one. A catchment that claimed
-    ground draining somewhere else would be the dangerous failure -- it would promise a
+    ground draining somewhere else would be the dangerous failure. It would promise a
     pond more water than the terrain delivers."""
     catchment, _ = delineate(valley_surface, 5.0, y)
     assert catchment.area_m2 <= VALLEY.analytic_catchment_area(y) * (1 + 1e-9)
@@ -167,10 +167,10 @@ def test_the_error_is_a_constant_number_of_cells_not_a_constant_fraction(valley_
     """The structure of the residual, stated as a test.
 
     The same 199 cells go missing at every Y where the outlet falls between contours, and
-    none at all where it falls on one. That is a single row of outlet placement -- the row
-    the outlet is in, minus the outlet itself -- and it identifies the residual as sub-cell
-    positioning rather than a proportional routing error. A routing error would take a
-    fraction, and would grow with the catchment.
+    none at all where it falls on one. That is one row of cells: the row the outlet is in,
+    minus the outlet itself. It identifies the residual as sub-cell positioning and not a
+    proportional routing error, because a routing error would take a fraction and would
+    grow with the catchment.
     """
     width = valley_surface.sample(5.0).shape[1]
     shortfalls = {y: missing_cells(delineate(valley_surface, 5.0, y)[0], y, 5.0)
@@ -220,7 +220,7 @@ def test_the_flat_bands_are_really_there(valley_surface):
     """The mechanism itself, made visible.
 
     Near a contour's V-apex the tent's legs wrap around the valley axis, so a Delaunay
-    triangle can have all three vertices on the *same* contour -- and a triangle whose
+    triangle can have all three vertices on the *same* contour, and a triangle whose
     corners are all at one elevation interpolates to a plane. Down the channel of the raw
     interpolation there are runs of cells at bit-identical elevations; after smoothing
     the longest such run is far shorter.
@@ -241,11 +241,11 @@ def test_the_flat_bands_are_really_there(valley_surface):
 
 
 # --------------------------------------------------------------------------- #
-# Test 3 -- the sub-tile test: nothing is fitted to the sample
+# Test 3. The sub-tile test: nothing is fitted to the sample
 # --------------------------------------------------------------------------- #
 def test_the_valley_is_nowhere_near_the_sample_sheet(valley_contours, sample_contours):
     """The most basic anti-hard-coding check: if any coordinate of the sample had leaked
-    into the code, the valley -- 1,800 km away -- would come out visibly wrong."""
+    into the code, the valley. 1,800 km away. Would come out visibly wrong."""
     assert abs(valley_contours.metadata.bbox[0] - sample_contours.metadata.bbox[0]) > 0.01
 
 
@@ -302,7 +302,7 @@ def test_the_quadrants_give_four_different_answers(sample_contours):
 
 
 # --------------------------------------------------------------------------- #
-# Test 4 -- structural variants, end to end
+# Test 4. Structural variants, end to end
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
     "name",
@@ -330,7 +330,7 @@ def test_every_structural_variant_survives_the_whole_pipeline(name):
 
 def test_the_variants_all_describe_the_same_hill():
     """They are the same three contour rings written five ways, so beyond the parsing they
-    must produce the same terrain -- a check that the geometry handling is equivalent, not
+    must produce the same terrain. A check that the geometry handling is equivalent, not
     merely non-crashing."""
     areas = {}
     for name in ("placemark_name", "no_namespace", "spaced_coordinates", "with_labels_folder"):

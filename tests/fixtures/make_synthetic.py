@@ -20,8 +20,8 @@ and runs down the channel.
 
     A(Y) = 1000 * (1000 - Y)   square metres
 
-The valley is written out as a contour map and read back through the identical pipeline --
-parser, projection, interpolation, smoothing, fill, D8, accumulation, delineation -- so
+The valley is written out as a contour map and read back through the identical pipeline,
+parser, projection, interpolation, smoothing, fill, D8, accumulation, delineation, so
 what is being tested is the whole chain, not a component in isolation.
 
 The contours are exact straight lines: level `c` is `y = 100c - 5|x|`, a tent clipped to
@@ -53,7 +53,7 @@ class SyntheticValley:
 
     interval_m: float = 1.0
     """Contour interval. With |grad z| = 0.051 this puts the contour lines 19.6 m apart,
-    so the pipeline derives a 4.9 m grid and a 2.45 m smoothing sigma -- the 5 m / 2.5 m
+    so the pipeline derives a 4.9 m grid and a 2.45 m smoothing sigma. The 5 m / 2.5 m
     regime PLAN §3 Test A reports."""
 
     vertex_spacing_m: float = 5.0
@@ -61,7 +61,7 @@ class SyntheticValley:
     to be fine enough that the triangulation does not cut corners."""
 
     origin: tuple[float, float] = (81.3, 21.25)
-    """Where to place the valley on the globe. Arbitrary -- and deliberately not where the
+    """Where to place the valley on the globe. Arbitrary, and deliberately not where the
     sample sheet is, so a result that secretly depends on the sample's coordinates comes
     out visibly wrong rather than plausibly right."""
 
@@ -158,7 +158,7 @@ def clip_contours(contours, bbox: tuple[float, float, float, float]):
 
     Each line is walked vertex by vertex and every unbroken run of vertices inside the
     window becomes a line of its own, so a contour that leaves and re-enters produces two
-    lines -- which is exactly what a real clipped export looks like.
+    lines, which is exactly what a real clipped export looks like.
     """
     from app.core.kml_parser import ContourSet
 
@@ -191,7 +191,7 @@ def clip_contours(contours, bbox: tuple[float, float, float, float]):
     line_starts = np.asarray(starts, dtype=np.int64)
     points = np.concatenate(chunks)
     levels = tuple(sorted(set(elevations)))
-    # Refresh the metadata that the clip invalidates -- a stale bbox or level list would
+    # Refresh the metadata that the clip invalidates. A stale bbox or level list would
     # let the sub-tile test pass on numbers describing the whole sheet.
     metadata = dataclasses.replace(
         contours.metadata,

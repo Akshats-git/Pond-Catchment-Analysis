@@ -1,8 +1,8 @@
-"""Phase 8 -- GeoJSON export.
+"""Phase 8. GeoJSON export.
 
 The acceptance criterion for this phase is visual: the output has to land on the right
 piece of ground in geojson.io. Nothing here can look at a map, so the tests check the
-things that would make it land in the wrong place or draw the wrong shape -- the area the
+things that would make it land in the wrong place or draw the wrong shape. The area the
 ring encloses, the winding RFC 7946 requires, holes attached to the ring that contains
 them, and coordinates that survive a round trip back through the projection to the cells
 they came from.

@@ -1,4 +1,4 @@
-"""Phase 2 -- local metric projection.
+"""Phase 2. Local metric projection.
 
 The projection is three lines of arithmetic, which is exactly why it is worth testing:
 everything downstream assumes the grid is square in metres and exactly invertible, and
@@ -28,7 +28,7 @@ def test_origin_maps_to_zero(proj):
 
 def test_round_trip_is_exact(proj):
     """Phase 4 converts real-world coordinates to grid indices and back. A lossy round
-    trip there returns a neighbouring cell -- and somebody else's catchment."""
+    trip there returns a neighbouring cell, and somebody else's catchment."""
     rng = np.random.default_rng(0)
     lonlat = np.column_stack([
         rng.uniform(RAIPUR[0] - 0.02, RAIPUR[0] + 0.02, 5000),
@@ -118,7 +118,7 @@ def test_scale_error_against_wgs84_is_small(proj):
     the scale is slightly off: -0.04% east-west and -0.16% north-south.
 
     That is a ~4 m stretch across the 2.6 km sheet and a -0.2% bias on every reported
-    area -- 0.8 ha on a 395 ha catchment. Twenty times smaller than the +/-4% spread the
+    area. 0.8 ha on a 395 ha catchment. Twenty times smaller than the +/-4% spread the
     resolution ensemble reports for the same catchment, so it is a documented bias rather
     than a correction worth making.
     """

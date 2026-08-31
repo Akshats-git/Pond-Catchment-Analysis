@@ -25,7 +25,7 @@ NAMESPACE = 'xmlns="http://www.opengis.net/kml/2.2"'
 
 
 def _ring(level: float, *, closed: bool = True) -> list[tuple[float, float]]:
-    """A rectangle whose size shrinks as the level rises -- a simple hill."""
+    """A rectangle whose size shrinks as the level rises. A simple hill."""
     half = 0.004 * (1.0 - LEVELS.index(level) * 0.25)
     corners = [
         (LON0 - half, LAT0 - half),
@@ -49,7 +49,7 @@ def _document(body: str, *, namespace: str = NAMESPACE, name: str = "Variant") -
 
 
 # --------------------------------------------------------------------------- #
-# Cascade strategy 1 -- z coordinate
+# Cascade strategy 1. Z coordinate
 # --------------------------------------------------------------------------- #
 def z_coordinate() -> bytes:
     """3D LineStrings with deliberately non-numeric names, so only z can win."""
@@ -63,7 +63,7 @@ def z_coordinate() -> bytes:
 
 
 # --------------------------------------------------------------------------- #
-# Cascade strategy 2 -- ExtendedData
+# Cascade strategy 2. ExtendedData
 # --------------------------------------------------------------------------- #
 def extended_data(field_name: str = "elevation", *, numeric_names: bool = False) -> bytes:
     """A schema field carries the height; names and coordinates give nothing away.
@@ -97,7 +97,7 @@ def extended_data_untyped() -> bytes:
 
 
 # --------------------------------------------------------------------------- #
-# Cascade strategy 3 -- Placemark name (the provided sample's shape)
+# Cascade strategy 3. Placemark name (the provided sample's shape)
 # --------------------------------------------------------------------------- #
 def placemark_name(suffix: str = "", levels: tuple[float, ...] = LEVELS) -> bytes:
     body = "\n".join(
@@ -110,11 +110,11 @@ def placemark_name(suffix: str = "", levels: tuple[float, ...] = LEVELS) -> byte
 
 
 # --------------------------------------------------------------------------- #
-# Cascade strategy 4 -- enclosing Folder name
+# Cascade strategy 4. Enclosing Folder name
 # --------------------------------------------------------------------------- #
 def folder_name() -> bytes:
-    """One folder per level. The outer folder name parses as a number on purpose --
-    it names the *interval*, not a height -- to prove the nearest folder wins."""
+    """One folder per level. The outer folder name parses as a number on purpose,
+    it names the *interval*, not a height, to prove the nearest folder wins."""
     body = "<Folder><name>Contours 1.0</name>" + "".join(
         f"<Folder><name>{lv:g} m</name>"
         f"<Placemark><name>contour-{i}</name>"
@@ -149,7 +149,7 @@ def polygon() -> bytes:
 
 
 def multigeometry() -> bytes:
-    """One Placemark, one elevation, several disjoint line segments -- how a contour
+    """One Placemark, one elevation, several disjoint line segments. How a contour
     that leaves and re-enters the sheet is usually exported."""
     parts = []
     for lv in LEVELS:
@@ -169,7 +169,7 @@ def no_namespace() -> bytes:
 
 
 def spaced_coordinates() -> bytes:
-    """Coordinates with spaces after the commas -- legal, and it breaks naive splitting."""
+    """Coordinates with spaces after the commas. Legal, and it breaks naive splitting."""
     body = "\n".join(
         f"<Placemark><name>{lv}</name><LineString><coordinates>"
         + _coords(lv, closed=False).replace(",", ", ")
@@ -192,9 +192,9 @@ def with_labels_folder() -> bytes:
 
 
 STRAY_LEVELS = tuple(float(v) for v in range(10, 210, 10))
-"""Twenty contours, so a single unlabelled placemark is 5% of the file -- inside the
-default coverage tolerance, as the sample's 1-in-1,356 is. Three contours plus one stray
-would be 25%, which the guard is right to reject."""
+"""Twenty contours, so a single unlabelled placemark is 5% of the file. That sits inside
+the default coverage tolerance, as the sample's 1 in 1,356 does. Three contours plus one
+stray would be 25%, which the guard is right to reject."""
 
 
 def stray_3d_polygon() -> bytes:
@@ -211,7 +211,7 @@ def stray_3d_polygon() -> bytes:
 
 
 def feet_interval() -> bytes:
-    """A 5-unit contour interval -- almost certainly feet. Must warn, never convert."""
+    """A 5-unit contour interval. Almost certainly feet. Must warn, never convert."""
     return placemark_name(levels=(100.0, 105.0, 110.0))
 
 

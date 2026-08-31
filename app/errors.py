@@ -1,8 +1,8 @@
 """One exception and one handler, so every failure leaves the service the same shape.
 
 `app/core/` raises five different exception types. The route maps each to a status code
-and re-raises it as an `APIError`; `app.main` renders that -- and FastAPI's own request
-validation failures -- into the `{status, code, detail, hint}` body documented as
+and re-raises it as an `APIError`. `app.main` renders that, and FastAPI's own request
+validation failures with it, into the `{status, code, detail, hint}` body documented as
 `ErrorResponse`. A client therefore parses one thing, whether the file was unreadable,
 the curve number was 200, or the framework rejected the multipart body before any of this
 code ran.

@@ -1,4 +1,4 @@
-"""Phase 1 -- KML/KMZ contour parser.
+"""Phase 1. KML/KMZ contour parser.
 
 Two kinds of test here. The first block pins the parser against the *provided* sample
 sheet: those numbers are the Phase 1 acceptance criteria and must not drift. The second
@@ -59,7 +59,7 @@ def test_stray_land_polygon_is_excluded(sample):
     assert sample.metadata.skipped_features == 1
     assert sample.elevations.min() == 267.0
     assert len(sample.metadata.warnings) == 1
-    assert "no resolvable elevation" in sample.metadata.warnings[0]
+    assert "had no height that could be read" in sample.metadata.warnings[0]
 
 
 def test_labels_folder_is_ignored_but_cross_checked(sample):
@@ -79,7 +79,7 @@ def test_sample_arrays_are_structurally_consistent(sample):
 
 
 def test_every_vertex_carries_its_own_contour_elevation(sample):
-    """PLAN §2 Step 1 -- the whole basis of the DEM."""
+    """PLAN §2 Step 1. The whole basis of the DEM."""
     for i in (0, 1, 700, sample.line_count - 1):
         block = sample.elevations[sample.line_starts[i] : sample.line_starts[i + 1]]
         assert np.all(block == sample.line_elevations[i])
@@ -132,7 +132,7 @@ def test_a_single_3d_placemark_cannot_hijack_the_cascade():
 
 
 def test_id_like_extended_fields_are_not_mistaken_for_elevations():
-    """The sample's only SimpleData field is `ID`, running 0..1354 -- a plausible-looking
+    """The sample's only SimpleData field is `ID`, running 0..1354. A plausible-looking
     set of "elevations" that would silently destroy the terrain. The cascade must skip
     it and fall through to the placemark name."""
     cs = parse_contours(mv.extended_data(field_name="ID", numeric_names=True))
@@ -156,7 +156,7 @@ def test_a_hyphen_in_a_name_is_not_read_as_a_minus_sign():
 
 
 def test_coverage_threshold_is_configurable():
-    """A stricter threshold rejects a file the default accepts -- proving the guard is
+    """A stricter threshold rejects a file the default accepts. Proving the guard is
     the thing doing the work, not a coincidence of ordering."""
     document = mv.stray_3d_polygon()
     strict = ParserConfig(strategy_min_coverage=1.0)
@@ -241,7 +241,7 @@ def test_a_one_metre_interval_raises_no_unit_warning():
 
 
 # --------------------------------------------------------------------------- #
-# Rejections -- structured, with a code the API can map to a status
+# Rejections. Structured, with a code the API can map to a status
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
     "builder, code",

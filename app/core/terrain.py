@@ -20,7 +20,7 @@ diagonal neighbour is 41% further away, so an equal drop across it is a shallowe
 **Flow accumulation.** Because every receiver is *strictly* lower than its donor, sorting
 cells by descending elevation is a topological order of the flow graph. One pass down
 that order, adding each cell's running total to its receiver, gives the number of cells
-draining through every cell -- the streams light up as ridges of large values.
+draining through every cell. The streams light up as ridges of large values.
 
 `TerrainEngine` is an interface (PLAN §5, §8). The HLD names pysheds; we implement the
 same D8 methodology directly so the service stays deployable on a free tier, and swapping
@@ -98,10 +98,10 @@ class FlowField:
     """The drainage structure of a DEM."""
 
     filled: np.ndarray
-    """(ny, nx) float64 -- depression-filled elevations, NaN at no-data."""
+    """(ny, nx) float64. Depression-filled elevations, NaN at no-data."""
 
     receivers: np.ndarray
-    """(ny * nx,) int64 -- flat index of the cell each cell drains into.
+    """(ny * nx,) int64. Flat index of the cell each cell drains into.
 
     -1 marks an outlet (water leaves the mapped area here) or a no-data cell. Flat rather
     than a direction code because Phase 4 walks these pointers backwards, and an index is
@@ -109,14 +109,14 @@ class FlowField:
     """
 
     accumulation: np.ndarray
-    """(ny, nx) float64 -- number of cells draining through each cell, itself included."""
+    """(ny, nx) float64. Number of cells draining through each cell, itself included."""
 
     order: np.ndarray
-    """(n_valid,) int64 -- valid cells by descending filled elevation. A topological
+    """(n_valid,) int64. Valid cells by descending filled elevation. A topological
     order of the flow graph, reused by Phase 4 rather than recomputed."""
 
     slope: np.ndarray
-    """(ny, nx) float64 -- rise over run, dimensionless. NaN at no-data."""
+    """(ny, nx) float64. Rise over run, dimensionless. NaN at no-data."""
 
     dem: DEM
     meta: FlowMetadata
@@ -126,7 +126,7 @@ class FlowField:
         return self.filled.shape  # type: ignore[return-value]
 
     def terminal_outlets(self) -> np.ndarray:
-        """(ny, nx) int64 -- the flat index of the outlet each cell ultimately drains to.
+        """(ny, nx) int64. The flat index of the outlet each cell ultimately drains to.
 
         Every valid cell reaches exactly one outlet, so this partitions the map into
         basins. Phase 4 uses it to suppress a whole sub-basin after picking a site, and
@@ -149,8 +149,8 @@ class FlowField:
 
         Accumulation counts *cells*, so this uses the latitude-weighted area of the row
         the cell sits in. Across one sheet the row-to-row variation is under 0.01%, so
-        the approximation is far below the resolution ensemble's spread -- Phase 4 sums
-        the real per-cell areas over the catchment mask when the number has to be exact.
+        the approximation sits far below the spread between grids. Phase 4 sums the real
+        per-cell areas over the catchment mask when the number has to be exact.
         """
         return float(self.accumulation[row, col]) * float(
             self.dem.row_cell_areas[row]
@@ -301,7 +301,7 @@ class D8TerrainEngine(TerrainEngine):
         """Valid cells by descending filled elevation.
 
         Every receiver is strictly lower than its donor, so this ordering guarantees each
-        cell is processed before the cell it drains into -- and, incidentally, that the
+        cell is processed before the cell it drains into, and, along the way, that the
         flow graph has no cycles at all.
         """
         flat_valid = np.flatnonzero((~nodata).ravel())
@@ -317,8 +317,8 @@ class D8TerrainEngine(TerrainEngine):
     ) -> np.ndarray:
         """Cells draining through each cell, itself included.
 
-        `weights` lets a later phase accumulate something other than a cell count --
-        per-cell rainfall, say -- without changing the traversal.
+        `weights` lets a later phase accumulate something other than a cell count, such
+        as per-cell rainfall, without changing the traversal.
         """
         total = np.zeros(shape[0] * shape[1], dtype=np.float64)
         if weights is None:
@@ -339,7 +339,7 @@ class D8TerrainEngine(TerrainEngine):
 
     # ------------------------------------------------------------------ #
     def slope(self, dem: DEM) -> np.ndarray:
-        """Horn's 3x3 gradient -- rise over run, dimensionless.
+        """Horn's 3x3 gradient, as rise over run.
 
         The same estimator GDAL and ArcGIS use: a weighted central difference that is far
         less noisy than a two-cell difference, which matters because Phase 6 rejects sites

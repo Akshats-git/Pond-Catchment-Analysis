@@ -1,4 +1,4 @@
-"""Phase 4 -- catchment delineation, edge diagnostics and the resolution ensemble.
+"""Phase 4. Catchment delineation, edge diagnostics and the resolution ensemble.
 
 The delineation itself is a tree traversal and is easy to check exactly on a synthetic
 surface. What needs care is everything around it: the edge-contact measure, which was
@@ -89,7 +89,7 @@ def test_a_catchment_contains_its_own_outlet(delineator):
 
 
 def test_catchments_of_nested_outlets_are_nested(delineator, flow):
-    """A downstream cell's catchment must contain its receiver's donors' -- basic
+    """A downstream cell's catchment must contain its receiver's donors'. Basic
     consistency of the flow tree."""
     row, col = np.unravel_index(
         int(np.argmax(delineator.flow.accumulation)), flow.shape
@@ -127,7 +127,7 @@ def test_accumulation_at_the_outlet_equals_the_cell_count(delineator):
 
 
 # --------------------------------------------------------------------------- #
-# Edge contact -- PLAN §11.3
+# Edge contact. PLAN §11.3
 # --------------------------------------------------------------------------- #
 def test_an_interior_catchment_has_no_edge_contact():
     mask = np.zeros((10, 10), dtype=bool)
@@ -142,7 +142,7 @@ def test_a_catchment_filling_the_grid_is_all_edge():
 
 def test_edge_contact_counts_nodata_not_just_the_border():
     """The bug PLAN §11.3 names. This catchment touches no border at all, but half its
-    perimeter faces a no-data hole -- ground the contours never described. Testing only
+    perimeter faces a no-data hole. Ground the contours never described. Testing only
     the array border would report it complete."""
     nodata = np.zeros((12, 12), dtype=bool)
     nodata[4:8, 8:] = True
@@ -181,7 +181,7 @@ def test_lower_bound_flag_follows_the_threshold(delineator):
 
 
 # --------------------------------------------------------------------------- #
-# Snapping -- PLAN §11.4, §11.9
+# Snapping. PLAN §11.4, §11.9
 # --------------------------------------------------------------------------- #
 def test_snap_radius_scales_with_the_contour_spacing(delineator):
     """Not a fixed 30 m: the routed channel moves about 90 m between the ensemble's
@@ -240,9 +240,9 @@ def test_snapping_can_be_turned_off(delineator):
 # Relief and flow path
 # --------------------------------------------------------------------------- #
 def test_relief_is_measured_against_the_outlet_not_the_minimum(delineator):
-    """A contour-derived DEM has unfilled pits in it, some below the outlet. Taking
-    max-minus-min credits the basin with a drop the water never has -- about 4 m too much
-    on every site of the sample."""
+    """A contour-derived DEM has unfilled pits in it, some of them below the outlet.
+    Taking max minus min credits the basin with a drop the water never has, about 4 m too
+    much on every site of the sample."""
     catchment = delineator.delineate(*PUBLISHED_SITES[0][:2])
     ground = delineator.dem.z[catchment.mask]
     outlet_z = delineator.dem.z[catchment.outlet_rc]
@@ -252,7 +252,7 @@ def test_relief_is_measured_against_the_outlet_not_the_minimum(delineator):
 
 
 def test_kirpich_relief_differs_from_basin_relief(delineator):
-    """The most distant point is rarely the highest one -- 19.7 m against 27.0 m on the
+    """The most distant point is rarely the highest one. 19.7 m against 27.0 m on the
     largest basin. Kirpich wants the drop along the flow path."""
     catchment = delineator.delineate(*PUBLISHED_SITES[0][:2])
     assert catchment.flow_path_relief_m < catchment.relief_m
@@ -277,7 +277,7 @@ def test_flow_path_is_at_least_the_straight_line_distance(delineator):
 
 
 # --------------------------------------------------------------------------- #
-# The published results -- PLAN Phase 4 acceptance
+# The published results. PLAN Phase 4 acceptance
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("index", range(5))
 def test_published_areas_reproduce(delineator, index):
@@ -311,7 +311,7 @@ def test_the_clipped_site_is_the_one_with_edge_contact(delineator):
 
 
 # --------------------------------------------------------------------------- #
-# The ensemble -- PLAN §3 Test C
+# The ensemble. PLAN §3 Test C
 # --------------------------------------------------------------------------- #
 def test_ensemble_uses_three_grids(ensemble):
     assert ensemble.resolutions_m == (5.0, 3.5, 2.5)

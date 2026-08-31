@@ -1,9 +1,9 @@
-"""Phase 3 -- pit filling, D8 flow direction, flow accumulation and slope.
+"""Phase 3. Pit filling, D8 flow direction, flow accumulation and slope.
 
 Flow routing is easy to get subtly wrong and hard to eyeball: a map of flow accumulation
 looks like a river network whether or not the numbers are right. So most of what follows
-runs on surfaces whose answer can be worked out on paper -- a tilted plane, a single pit,
-a flat plateau -- and only then checks the sample sheet.
+runs on surfaces whose answer can be worked out on paper. A tilted plane, a single pit,
+a flat plateau, and only then checks the sample sheet.
 """
 
 from __future__ import annotations
@@ -181,7 +181,7 @@ def test_filling_is_seeded_from_nodata_not_only_from_the_border():
 
 def test_epsilon_breaks_ties_across_a_flat(flat_plateau):
     """Without the epsilon gradient a flat band has no downhill direction anywhere, and
-    D8 turns every cell on it into its own outlet -- the failure PLAN §2 Step 4 describes.
+    D8 turns every cell on it into its own outlet. The failure PLAN §2 Step 4 describes.
 
     Measured on the sample sheet: epsilon 0 gives 108,526 outlets and a maximum
     accumulation of 712 cells; epsilon 1e-4 gives 308 outlets and 158,262.
@@ -194,7 +194,7 @@ def test_epsilon_breaks_ties_across_a_flat(flat_plateau):
 
 def test_epsilon_ascent_stays_negligible(real_dem):
     """Priority-flood adds `eps` per cell along a flat run, so in principle a long flat
-    could accumulate real height -- 1e-4 over the sample's 332,365 cells would be 33 m if
+    could accumulate real height. 1e-4 over the sample's 332,365 cells would be 33 m if
     the whole map were one flat.
 
     It does not happen, because the flats are short: the largest per-cell ascent on the
@@ -253,7 +253,7 @@ def test_topological_order_processes_donors_before_receivers(flow):
 
 
 # --------------------------------------------------------------------------- #
-# Mass balance -- PLAN §3 Test B
+# Mass balance. PLAN §3 Test B
 # --------------------------------------------------------------------------- #
 def test_every_cell_reaches_exactly_one_outlet(flow, real_dem):
     terminal = flow.terminal_outlets()
@@ -286,7 +286,7 @@ def test_mass_balance_holds_at_every_ensemble_resolution(surface, resolution):
 # Slope
 # --------------------------------------------------------------------------- #
 def test_slope_of_a_known_plane():
-    """Horn's estimator is exact on a plane -- a 5% grade must read 0.05."""
+    """Horn's estimator is exact on a plane. A 5% grade must read 0.05."""
     dem = plane_east(drop=0.05)
     slope = ENGINE.slope(dem)
     assert slope[3:-3, 3:-3] == pytest.approx(0.05, abs=1e-9)
@@ -312,11 +312,11 @@ def test_slope_is_finite_wherever_there_is_data(flow, real_dem):
 
 
 # --------------------------------------------------------------------------- #
-# The sample sheet -- Phase 3 acceptance
+# The sample sheet. Phase 3 acceptance
 # --------------------------------------------------------------------------- #
 def test_acceptance_max_accumulation(flow):
     """PLAN Phase 3: ~157,766 cells at 5 m. That is 47.6% of the map, which is the same
-    basin PLAN §3 reports as site 1 at 395.4 ha -- two independent routes to one number."""
+    basin PLAN §3 reports as site 1 at 395.4 ha. Two independent routes to one number."""
     assert flow.meta.max_accumulation == pytest.approx(157_766, rel=0.02)
 
 
@@ -329,10 +329,10 @@ def test_pond_water_levels_are_quantised_to_the_contour_interval(flow, real_dem)
     """A limitation worth pinning rather than hiding (PLAN §10).
 
     A depression fills until it spills over its lowest rim, and on a contour-derived DEM
-    that rim sits on a contour line. So a *pool's water level* -- and therefore the
-    natural storage Phase 7 reports -- can only take values a contour interval apart. On
-    the sample, 90% of pools of 20 cells or more have a spill elevation within 0.1 m of a
-    whole metre, with a median offset of 2.6 mm.
+    that rim sits on a contour line. So a pool's water level, and with it the natural
+    storage Phase 7 reports, can only take values a contour interval apart. On the sample,
+    90% of pools of 20 cells or more have a spill elevation within 0.1 m of a whole metre,
+    with a median offset of 2.6 mm.
 
     Note what is *not* quantised: the fill depth of an individual cell, because the cell's
     own elevation is interpolated between contours and takes any value. Only 39% of
@@ -391,7 +391,7 @@ def flow(real_dem):
 
 @pytest.fixture
 def flat_plateau():
-    """A wide flat band with a single low outlet -- the stair-step problem in miniature."""
+    """A wide flat band with a single low outlet. The stair-step problem in miniature."""
     z = np.full((30, 30), 50.0)
     z[29, 15] = 49.0
     return synthetic_dem(z, 5.0)

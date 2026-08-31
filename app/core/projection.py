@@ -14,7 +14,7 @@ one cosine, evaluated once at the dataset centroid.
 Accuracy, stated honestly. Those two constants are mid-latitude values, so at the 21 N of
 the sample sheet the frame carries a small *scale* error against WGS-84: -0.04%
 east-west and -0.16% north-south. That is a ~4 m stretch across the 2.6 km sheet and a
--0.2% bias on every reported area -- 0.8 ha on a 395 ha catchment, twenty times smaller
+-0.2% bias on every reported area. That is 0.8 ha on a 395 ha catchment, twenty times smaller
 than the +/-4% spread the resolution ensemble reports for that same catchment. The
 *shape* distortion, which is the part flow routing could actually notice, is 0.12%: a
 uniform scale error cancels when D8 compares one neighbour against another.
@@ -30,7 +30,7 @@ factor is the *constant* cos(lat0), a square cell of side `res` in projected spa
 
     res^2 * cos(lat_cell) / cos(lat0)
 
-square metres on the ground -- the latitude weighting of PLAN §2 Step 6.
+square metres on the ground. This is the latitude weighting of PLAN §2 Step 6.
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ class Projection(ABC):
     @property
     @abstractmethod
     def origin(self) -> tuple[float, float]:
-        """(lon0, lat0) in degrees -- the point that maps to (0, 0) metres."""
+        """(lon0, lat0) in degrees. The point that maps to (0, 0) metres."""
 
     @abstractmethod
     def forward(self, lonlat: np.ndarray) -> np.ndarray:
@@ -129,7 +129,7 @@ class EquirectangularENU(Projection):
         return out
 
     def area_factor(self, lat: np.ndarray | float) -> np.ndarray | float:
-        """cos(lat) / cos(lat0) -- see the module docstring."""
+        """cos(lat) / cos(lat0). See the module docstring."""
         return np.cos(np.radians(lat)) / self._cos_lat0  # type: ignore[attr-defined]
 
 

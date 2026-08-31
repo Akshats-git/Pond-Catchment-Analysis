@@ -1,4 +1,4 @@
-"""Phase 5 Test B -- mass balance.
+"""Phase 5 Test B. Mass balance.
 
 The cheapest possible check on a flow network, and the strictest. Every cell drains to
 exactly one outlet, so the basins tile the map: their areas must sum to the mapped area,
@@ -6,7 +6,7 @@ with nothing lost and nothing double-counted.
 
 It is worth having because it fails loudly for almost any real defect in the routing. A
 cycle in the flow graph, a cell that drains into no-data, an off-by-one in the neighbour
-offsets, a catchment that claims a cell twice -- all of them break the sum. Measured on
+offsets, a catchment that claims a cell twice. All of them break the sum. Measured on
 the sample sheet the difference is 0.00000000%.
 """
 
@@ -47,7 +47,7 @@ def test_basins_tile_the_sample_sheet(sample_surface, resolution):
 
 
 def test_the_sample_mass_balance_is_exact(sample_flow, sample_dem):
-    """Not merely within tolerance -- exact to floating point. Areas are summed the same
+    """Not merely within tolerance. Exact to floating point. Areas are summed the same
     way on both sides, so any discrepancy at all would be a real cell going missing."""
     total = basin_areas(sample_flow, sample_dem).sum()
     assert abs(total - sample_dem.meta.mapped_area_m2) / total < 1e-12
@@ -77,7 +77,7 @@ def test_delineated_basins_partition_the_map(sample_flow, sample_dem):
     """Approach the same invariant through the code the API actually calls.
 
     `terminal_outlets` walks downstream; `upstream_mask` walks up. Delineating every
-    outlet must reconstruct the map exactly once over -- no cell in two catchments, none
+    outlet must reconstruct the map exactly once over. No cell in two catchments, none
     in none. That the two independent traversals agree is the real content here.
     """
     delineator = CatchmentDelineator(sample_flow)

@@ -4,15 +4,15 @@ This is the generalisation surface of the service: everything downstream works o
 `ContourSet`, so supporting a new flavour of contour file means changing only this
 module.
 
-The hard problem is not the geometry -- it is finding the *elevation*. KML has no
+The hard problem is not the geometry. It is finding the height. KML has no
 standard place to put a contour's height, so producers put it wherever they like. The
 parser therefore resolves elevation by a **cascade** (PLAN Phase 1): four strategies are
 tried in order and the first one that explains almost every contour wins.
 
-    1. z_coordinate   -- the third ordinate of a 3D <coordinates> tuple
-    2. extended_data  -- <ExtendedData><SimpleData name="elev">270</SimpleData>
-    3. placemark_name -- <Placemark><name>270.0</name>          <- the provided sample
-    4. folder_name    -- an enclosing <Folder><name>270 m</name>
+    1. z_coordinate    the third number of a 3D <coordinates> tuple
+    2. extended_data   <ExtendedData><SimpleData name="elev">270</SimpleData>
+    3. placemark_name  <Placemark><name>270.0</name>          <- the provided sample
+    4. folder_name     an enclosing <Folder><name>270 m</name>
 
 A strategy is accepted only when it resolves an elevation for at least
 `strategy_min_coverage` of the geometries *and* produces at least
@@ -86,7 +86,7 @@ class ContourMetadata:
 
     unit_hint: str | None = None
     """A unit token seen alongside the elevations ("m", "ft", ...), if any. Reported,
-    never acted on -- the parser does not convert."""
+    never acted on, because the parser does not convert."""
 
     skipped_features: int = 0
     """Placemarks carrying line geometry that no strategy could give an elevation to.
@@ -97,7 +97,7 @@ class ContourMetadata:
     1,355 contour elevations as points; they add no surface information (PLAN §11.1)."""
 
     labels_consistent: bool | None = None
-    """Whether those label elevations are a subset of the contour levels -- a free
+    """Whether those label heights are a subset of the contour levels. This is a free
     cross-check that the cascade picked the right field."""
 
     document_name: str | None = None
@@ -115,18 +115,18 @@ class ContourSet:
     Every vertex of every contour line is a known `(lon, lat, z)`: a contour is a line of
     constant height, so each of its points has that height (PLAN §2 Step 1). The DEM
     builder wants the flat cloud; the resolution heuristic needs total contour *length*,
-    which needs the per-line grouping -- hence `line_starts`, CSR-style offsets into
+    which needs the per-line grouping. Hence `line_starts`, CSR-style offsets into
     `points`.
     """
 
     points: np.ndarray
-    """(N, 2) float64 -- lon, lat in degrees."""
+    """(N, 2) float64. Lon, lat in degrees."""
 
     elevations: np.ndarray
-    """(N,) float64 -- the parent contour's elevation, repeated per vertex."""
+    """(N,) float64. The parent contour's elevation, repeated per vertex."""
 
     line_starts: np.ndarray
-    """(L + 1,) int64 -- line `i` occupies points[line_starts[i]:line_starts[i + 1]]."""
+    """(L + 1,) int64. Line `i` occupies points[line_starts[i]:line_starts[i + 1]]."""
 
     metadata: ContourMetadata
 
@@ -140,7 +140,7 @@ class ContourSet:
 
     @property
     def line_elevations(self) -> np.ndarray:
-        """(L,) float64 -- one elevation per contour line."""
+        """(L,) float64. One elevation per contour line."""
         return self.elevations[self.line_starts[:-1]]
 
     def line_coords(self, index: int) -> np.ndarray:
@@ -153,7 +153,7 @@ class ContourSet:
 
 
 # --------------------------------------------------------------------------- #
-# XML helpers -- namespace-agnostic throughout
+# XML helpers, namespace-agnostic throughout
 # --------------------------------------------------------------------------- #
 def _localname(tag: object) -> str:
     """`{http://www.opengis.net/kml/2.2}Placemark` -> `Placemark`.
@@ -193,7 +193,7 @@ def _parse_coordinates(text: str) -> np.ndarray:
 
     The body is whitespace-separated `lon,lat[,alt]` tuples, but producers sprinkle
     spaces after the commas, so those are normalised away first. When every tuple has
-    the same arity -- the overwhelmingly common case -- the whole block is converted in
+    the same arity, which is overwhelmingly the common case, the whole block is converted in
     one numpy call; mixed arity falls back to a per-tuple loop.
     """
     text = _COMMA_WS.sub(",", text.strip())
@@ -208,14 +208,16 @@ def _parse_coordinates(text: str) -> np.ndarray:
         if ncols not in (2, 3):
             raise ContourParseError(
                 "unparseable_geometry",
-                f"Coordinate tuples have {ncols} ordinates; expected 2 or 3.",
+                f"Each coordinate has {ncols} numbers in it. A coordinate needs 2 or 3.",
                 "Each tuple must be lon,lat or lon,lat,altitude.",
             )
         try:
             flat = np.fromstring(text.replace(",", " "), dtype=np.float64, sep=" ")
         except ValueError as exc:  # pragma: no cover - numpy is lenient here
             raise ContourParseError(
-                "unparseable_geometry", f"Non-numeric coordinate: {exc}", ""
+                "unparseable_geometry",
+                f"One of the coordinates is not a number: {exc}",
+                "",
             ) from exc
         if flat.size != len(tokens) * ncols:
             return _parse_coordinates_slow(tokens)
@@ -235,7 +237,7 @@ def _parse_coordinates_slow(tokens: Sequence[str]) -> np.ndarray:
         if len(parts) < 2:
             raise ContourParseError(
                 "unparseable_geometry",
-                f"Coordinate tuple {token!r} has fewer than two ordinates.",
+                f"The coordinate {token!r} has fewer than two numbers in it.",
                 "Each tuple must be lon,lat or lon,lat,altitude.",
             )
         try:
@@ -245,7 +247,9 @@ def _parse_coordinates_slow(tokens: Sequence[str]) -> np.ndarray:
                 out[i, 2] = float(parts[2])
         except ValueError as exc:
             raise ContourParseError(
-                "unparseable_geometry", f"Non-numeric coordinate {token!r}.", ""
+                "unparseable_geometry",
+                f"The coordinate {token!r} is not a number.",
+                "",
             ) from exc
     return out
 
@@ -270,7 +274,7 @@ _UNIT_CANON = {
 def _parse_number(text: str | None) -> tuple[float, str | None] | None:
     """Read a label that *is* a number, optionally with a unit. Anchored on purpose.
 
-    Anchoring is what lets `land` and `sources` -- real placemark names in the sample --
+    Anchoring is what lets `land` and `sources`, both real placemark names in the sample,
     fail cleanly, while `277.0`, `270 m` and `Elevation: 270 m` all succeed. A loose
     search would happily return 1 for `contours_1.0m`.
 
@@ -299,7 +303,7 @@ class _Feature:
     extended: dict[str, str] = field(default_factory=dict)
     folders: tuple[str, ...] = ()
     ignored: bool = False
-    """Inside a folder matching `ignore_folder_pattern` -- carried for the label check."""
+    """Inside a folder matching `ignore_folder_pattern`. Carried for the label check."""
 
     point_names: list[str] = field(default_factory=list)
     """Names of Point geometries. Points never contribute surface information."""
@@ -364,7 +368,7 @@ def _elev_from_z(feature: _Feature) -> tuple[float, str | None] | None:
     """Median z of the feature's vertices, if they are 3D and effectively constant.
 
     A contour is a line of constant height, so a 3D contour whose z varies by more than
-    a metre along its length is not a contour -- it is a boundary or a track, and this
+    a metre along its length is not a contour. It is a boundary or a track, and this
     strategy declines it.
     """
     zs = np.concatenate([line[:, 2] for line in feature.lines])
@@ -439,18 +443,20 @@ def _resolve_elevations(
         strategy, levels = flat_levels[0]
         raise ContourParseError(
             "too_few_levels",
-            f"Strategy {strategy!r} gave every contour one of {len(levels)} elevation "
-            f"value(s); a surface needs at least {cfg.min_elevation_levels}.",
-            "The field read as an elevation may be an identifier or a contour interval "
-            "rather than a height.",
+            f"Reading heights from {strategy} gave only {len(levels)} different value "
+            f"across the whole file. A surface needs at least "
+            f"{cfg.min_elevation_levels} different heights.",
+            "The field being read as a height is probably an identifier or the contour "
+            "interval instead.",
         )
 
     raise ContourParseError(
         "no_elevations",
-        "No elevation strategy explained the contours. Tried -- " + "; ".join(attempts),
-        "Each contour needs a height: 3D coordinates, an <ExtendedData> field named "
-        "elev/elevation/level/height, a numeric <Placemark><name>, or a numeric "
-        "enclosing <Folder><name>.",
+        "Nothing in this file gives the contour lines a height. Tried "
+        + "; ".join(attempts) + ".",
+        "Every contour needs a height. It can come from 3D coordinates, an "
+        "<ExtendedData> field named elev, elevation, level or height, a number in "
+        "<Placemark><name>, or a number on the enclosing <Folder><name>.",
     )
 
 
@@ -467,7 +473,9 @@ def _kmz_member(data: bytes) -> bytes:
         archive = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile as exc:
         raise ContourParseError(
-            "unreadable_file", f"Not a readable KMZ archive: {exc}", "Upload a .kml or .kmz."
+            "unreadable_file",
+            f"This is not a readable KMZ archive: {exc}",
+            "Upload a .kml file, or a .kmz that opens as a zip.",
         ) from exc
 
     with archive:
@@ -475,8 +483,8 @@ def _kmz_member(data: bytes) -> bytes:
         if not members:
             raise ContourParseError(
                 "unreadable_file",
-                "The KMZ archive contains no .kml member.",
-                "A KMZ must contain the KML document, conventionally doc.kml.",
+                "There is no .kml file inside this KMZ archive.",
+                "A KMZ has to contain the KML document, usually named doc.kml.",
             )
         members.sort(key=lambda n: (n.lower() != "doc.kml", n.count("/"), n.lower()))
         return archive.read(members[0])
@@ -488,8 +496,8 @@ def _parse_xml(data: bytes) -> ET.Element:
     except ET.ParseError as exc:
         raise ContourParseError(
             "unparseable_xml",
-            f"The file is not well-formed XML: {exc}",
-            "Upload a valid KML document or a KMZ archive containing one.",
+            f"This file is not valid XML: {exc}",
+            "Upload a KML document, or a KMZ archive with one inside it.",
         ) from exc
 
 
@@ -504,15 +512,16 @@ def parse_contours(
 ) -> ContourSet:
     """Parse KML or KMZ bytes into a `ContourSet`.
 
-    Raises `ContourParseError` -- never returns a partially valid result.
+    Raises `ContourParseError` rather than ever returning a half-parsed result.
     """
     cfg = config or settings.parser
 
     if len(data) > cfg.max_upload_bytes:
         raise ContourParseError(
             "file_too_large",
-            f"{len(data) / 1e6:.1f} MB exceeds the {cfg.max_upload_bytes / 1e6:.0f} MB limit.",
-            "Clip the contour sheet to the area of interest and retry.",
+            f"The file is {len(data) / 1e6:.1f} MB and the limit is "
+            f"{cfg.max_upload_bytes / 1e6:.0f} MB.",
+            "Clip the contour sheet down to the area you care about and try again.",
         )
     if not data.strip():
         raise ContourParseError("unreadable_file", "The uploaded file is empty.", "")
@@ -531,9 +540,10 @@ def parse_contours(
     if not candidates:
         raise ContourParseError(
             "no_contours",
-            "No contour line geometry found (looked for LineString, LinearRing, "
-            "Polygon rings and MultiGeometry).",
-            "The file may contain only points or overlays. Export the contour *lines*.",
+            "There are no contour lines in this file. Looked for LineString, "
+            "LinearRing, Polygon rings and MultiGeometry.",
+            "The file may hold only point labels or image overlays. Export the contour "
+            "lines themselves.",
         )
 
     strategy, resolved = _resolve_elevations(candidates, cfg)
@@ -582,9 +592,9 @@ def _assemble(
     if len(starts) - 1 < cfg.min_contour_lines:
         raise ContourParseError(
             "no_contours",
-            f"Only {len(starts) - 1} contour line(s) carried an elevation; "
-            f"at least {cfg.min_contour_lines} are needed to build a surface.",
-            "Check that the contour lines have a numeric label.",
+            f"Only {len(starts) - 1} contour lines carried a height. Building a "
+            f"surface needs at least {cfg.min_contour_lines}.",
+            "Check that the contour lines are labelled with a number.",
         )
 
     points = np.concatenate(chunks).astype(np.float64, copy=False)
@@ -596,9 +606,9 @@ def _assemble(
     if len(levels) < cfg.min_elevation_levels:
         raise ContourParseError(
             "too_few_levels",
-            f"All contours share {len(levels)} elevation level(s); a surface needs at "
-            f"least {cfg.min_elevation_levels}.",
-            "The elevation field may be an identifier rather than a height.",
+            f"Every contour in this file sits at one of {len(levels)} heights. "
+            f"Building a surface needs at least {cfg.min_elevation_levels}.",
+            "The field being read as a height is probably an identifier instead.",
         )
 
     diffs = np.diff(levels)
@@ -612,19 +622,19 @@ def _assemble(
     low, high = cfg.feet_interval_range
     if low <= interval <= high:
         warnings.append(
-            f"Contour interval is {interval:g} units. Intervals in the "
-            f"{low:g}-{high:g} range are commonly feet, not metres. Elevations are "
-            "being used as given, unconverted -- verify the source units."
+            f"The contours are {interval:g} units apart. A gap between {low:g} and "
+            f"{high:g} usually means feet rather than metres. The heights are being used "
+            "exactly as written, with no conversion. Check what unit the map is in."
         )
     if unit_hint == "ft":
         warnings.append(
-            "Elevation labels carry a feet unit. Values are used as given, "
-            "unconverted -- verify the source units."
+            "The height labels say feet. They are being used exactly as written, with "
+            "no conversion. Check what unit the map is in."
         )
     if skipped:
         warnings.append(
-            f"{skipped} placemark(s) with line geometry had no resolvable elevation "
-            f"and were excluded (strategy: {strategy})."
+            f"{skipped} of the lines in this file had no height that could be read from "
+            f"{strategy}, so they were left out."
         )
 
     labels_consistent: bool | None = None
@@ -638,8 +648,8 @@ def _assemble(
         labels_consistent = label_values <= contour_values
         if not labels_consistent:
             warnings.append(
-                "Label placemarks carry elevations that are not among the contour "
-                "levels; the elevation field may have been misidentified."
+                "The point labels in this file give heights that no contour line uses. "
+                "The wrong field may have been read as the height."
             )
 
     metadata = ContourMetadata(

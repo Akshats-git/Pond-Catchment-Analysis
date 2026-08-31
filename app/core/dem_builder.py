@@ -6,8 +6,8 @@ interpolation itself.
 
 **The resolution is derived, not chosen.** A grid finer than the contours cannot invent
 detail, and a grid coarser than them throws detail away. The mean spacing between
-contour lines follows from an identity -- parallel lines of total length `L` spaced `w`
-apart fill an area `A = L * w` -- so
+contour lines follows from an identity. Parallel lines of total length `L` spaced `w`
+apart fill an area `A = L * w`, so
 
     mean contour spacing = mapped area / total contour length
     grid resolution      = spacing / 4
@@ -17,14 +17,14 @@ know more than the source does.
 
 **Interpolating between contours builds a staircase, not a hillside** (PLAN §2 Step 3).
 Linear interpolation makes the ground between two contour lines a flat band, and on a
-flat band D8 has no downhill direction to pick -- water runs *along* the step instead of
+flat band D8 has no downhill direction to pick, so water runs along the step instead of
 down it. In the analytic validation this cost up to 12.79% of the catchment area. A
 Gaussian of sigma = spacing / 8 turns the staircase back into a slope, moving the surface
 by less than one contour interval.
 
 The smoothing must be NaN-aware in the *normalised* form (PLAN §11.2): fill invalid cells
-with zero, smooth, and divide by the smoothed validity mask. The obvious alternative --
-fill with the mean and divide by the valid-cell weight -- inflated cells near the data
+with zero, smooth, and divide by the smoothed validity mask. The obvious alternative is
+to fill with the mean and divide by the valid-cell weight, and it inflated cells near the data
 edge into a 357 m peak on a map whose true maximum is 298 m.
 """
 
@@ -62,7 +62,7 @@ def row_cell_areas(
 ) -> np.ndarray:
     """(ny,) true ground area of one cell in each grid row, in m^2.
 
-    `res^2 * cos(lat) / cos(lat0)` -- the latitude weighting of PLAN §2 Step 6. It is a
+    `res^2 * cos(lat) / cos(lat0)`, which is the latitude weighting of PLAN §2 Step 6. It is a
     per-row quantity because the correction depends only on latitude. Free-standing
     rather than a method so the mapped area can be totalled while the DEM is still being
     assembled.
@@ -82,7 +82,7 @@ class DEMMetadata:
 
     resolution_m: float
     resolution_source: str
-    """auto | requested | coarsened -- `coarsened` means the memory ceiling bit."""
+    """One of auto, requested or coarsened. `coarsened` means the memory ceiling bit."""
 
     smoothing_sigma_m: float
     mean_contour_spacing_m: float
@@ -94,8 +94,8 @@ class DEMMetadata:
 
     mapped_area_m2: float
     """Sum of the true ground areas of the valid cells. This is the number every
-    downstream area is measured against -- the stream threshold, and the Phase 5 mass
-    balance -- so it must come from the same cells the flow router will walk."""
+    downstream area is measured against, including the stream threshold and the Phase 5
+    mass balance, so it has to come from the same cells the flow router will walk."""
 
     nodata_fraction: float
     elevation_range: tuple[float, float]
@@ -104,7 +104,7 @@ class DEMMetadata:
     """Largest distance the smoothing moved any single cell."""
 
     smoothing_shift_p999_m: float
-    """99.9th percentile of that shift -- the honest summary.
+    """99.9th percentile of that shift, which is the honest summary.
 
     The maximum is set by a handful of cells on the convex hull, where Delaunay bridges
     two distant contour lines with a long sliver triangle and the raw surface steps by
@@ -130,10 +130,10 @@ class DEM:
     """
 
     z: np.ndarray
-    """(ny, nx) float64 -- metres, NaN outside the mapped area."""
+    """(ny, nx) float64. Metres, NaN outside the mapped area."""
 
     nodata: np.ndarray
-    """(ny, nx) bool -- True where `z` is NaN."""
+    """(ny, nx) bool. True where `z` is NaN."""
 
     raw_z: np.ndarray
     """The unsmoothed interpolation, kept so the smoothing can be audited and so Phase 5
@@ -166,7 +166,7 @@ class DEM:
 
         The division stays *inside* `round`. Rounding first and dividing after returns a
         neighbouring cell, and a catchment delineated from the wrong cell looks perfectly
-        plausible -- it is simply somebody else's basin (PLAN §11.8).
+        plausible. It is simply somebody else's basin (PLAN §11.8).
         """
         x0, y0 = self.origin_xy
         return (int(round((y - y0) / self.resolution_m)),
@@ -343,7 +343,7 @@ class ContourSurface:
             original = resolution
             # Iterate rather than scaling once. The exact cell count floors the extent
             # before adding the fencepost cell, so a single analytic step lands just over
-            # the limit -- 50,298 cells against a 50,000 cap on the sample sheet.
+            # the limit, such as 50,298 cells against a 50,000 cap on the sample sheet.
             for _ in range(8):
                 if ny * nx <= cfg.max_grid_cells or resolution >= cfg.max_resolution_m:
                     break
@@ -415,7 +415,7 @@ class ContourSurface:
 
         # A normalised Gaussian is a weighted average of valid neighbours, so the result
         # cannot leave the input range. That makes this a real invariant rather than a
-        # tolerance -- and it is exactly the invariant the mean-fill bug violated, by
+        # tolerance, and it is exactly the invariant the mean-fill bug violated, by
         # 59 m. Assert it, cheaply, every time.
         if not (lo - 1e-6 <= smoothed_lo and smoothed_hi <= hi + 1e-6):
             raise DEMBuildError(
@@ -467,7 +467,7 @@ class ContourSurface:
 
     @staticmethod
     def _smooth(raw: np.ndarray, nodata: np.ndarray, sigma_cells: float) -> np.ndarray:
-        """Normalised (NaN-aware) Gaussian -- PLAN §11.2.
+        """Normalised, NaN-aware Gaussian (PLAN §11.2).
 
         Smoothing a grid with NaNs in it poisons everything within sigma of the hole. The
         fix is to smooth the data and the validity mask separately and divide:

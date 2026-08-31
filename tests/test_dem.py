@@ -1,4 +1,4 @@
-"""Phase 2 -- contour-interpolated DEM.
+"""Phase 2. Contour-interpolated DEM.
 
 Two halves again. Synthetic surfaces with known answers test the mechanics, because a
 plane interpolates to itself exactly and a NaN-aware Gaussian has an invariant that can
@@ -54,8 +54,8 @@ def test_resolution_follows_from_the_contour_spacing(surface):
 
 
 def test_sample_resolution_is_in_the_expected_regime(surface):
-    """Not pinned to a literal -- that is the point -- but a sanity band around the
-    ~12-15 m contour spacing this sheet has."""
+    """Not pinned to a literal, which is the point. This is a sanity band around the
+    12 to 15 m contour spacing this sheet has."""
     assert 12.0 < surface.mean_spacing_m < 16.0
     assert 3.0 < surface.auto_resolution_m < 4.0
 
@@ -88,7 +88,7 @@ def test_resolution_tracks_the_data_rather_than_the_sheet(contours):
 
 def test_length_is_summed_per_line_not_across_the_flat_array(contours):
     """The point array runs one contour straight into the next. Counting the jumps
-    triples the total on this sheet -- 1,900 km against 568 km."""
+    triples the total on this sheet. 1,900 km against 568 km."""
     proj = projection_for(contours.points)
     xy = proj.forward(contours.points)
     per_line, _ = contour_metrics(xy, contours.line_starts)
@@ -187,7 +187,7 @@ def test_cells_outside_the_hull_are_nodata(dem):
 
 
 # --------------------------------------------------------------------------- #
-# Smoothing -- PLAN §11.2, the 357 m peak
+# Smoothing. PLAN §11.2, the 357 m peak
 # --------------------------------------------------------------------------- #
 def test_smoothing_cannot_leave_the_input_range(dem, contours):
     """The normalised Gaussian is a weighted average of valid neighbours, so this holds
@@ -256,8 +256,8 @@ def test_disabling_smoothing_is_a_no_op_on_the_surface(surface):
 
 
 def _d8_dead_end_fraction(z: np.ndarray, valid: np.ndarray) -> float:
-    """Fraction of cells with no strictly lower neighbour -- where D8 has nowhere to send
-    its water. This, not visual smoothness, is what the stair-steps actually cost."""
+    """Fraction of cells with no strictly lower neighbour, which is where D8 has nowhere
+    to send its water. This, and not visual smoothness, is what the stair steps cost."""
     ny, nx = z.shape
     core, centre = valid[1:-1, 1:-1], z[1:-1, 1:-1]
     has_lower = np.zeros_like(core)
@@ -279,9 +279,9 @@ def test_smoothing_halves_the_cells_where_d8_has_nowhere_to_go(surface):
     the catchment: hillslope water ran along a step and joined the stream below the
     outlet.
 
-    The fix does not need to reshape the terrain -- it only needs to break the exact
+    The fix does not need to reshape the terrain. It only needs to break the exact
     ties, which is why a sigma of a third of a cell is enough. Measured on the sample:
-    13.91% of cells are D8 dead ends before smoothing, 7.07% after -- a 49% reduction.
+    13.91% of cells are D8 dead ends before smoothing, 7.07% after. A 49% reduction.
     The remainder is what Phase 3's pit filling is for.
     """
     dem = surface.sample(5.0)
@@ -292,11 +292,11 @@ def test_smoothing_halves_the_cells_where_d8_has_nowhere_to_go(surface):
 
 
 # --------------------------------------------------------------------------- #
-# Grid geometry -- PLAN §11.8
+# Grid geometry. PLAN §11.8
 # --------------------------------------------------------------------------- #
 def test_index_round_trip_hits_the_same_cell(dem):
     """`int(round((v - origin) / res))`, with the division inside `round`. Getting this
-    wrong returns a neighbouring cell -- and a perfectly plausible wrong catchment."""
+    wrong returns a neighbouring cell, and a perfectly plausible wrong catchment."""
     rng = np.random.default_rng(1)
     ny, nx = dem.shape
     for _ in range(500):
@@ -323,7 +323,7 @@ def test_contains_rejects_out_of_bounds(dem):
 
 
 # --------------------------------------------------------------------------- #
-# Area -- PLAN §2 Step 6
+# Area. PLAN §2 Step 6
 # --------------------------------------------------------------------------- #
 def test_cell_area_is_latitude_weighted(dem):
     """res^2 * cos(lat)/cos(lat0): cells shrink towards the pole."""
@@ -373,7 +373,7 @@ def test_acceptance_elevation_range_is_exact(dem):
 
     The upper bound is one-sided and needs no tolerance: convexity forbids overshoot, so
     a failure here means the 357 m bug is back. The small undershoot is real and expected
-    -- smoothing lowers a summit cell by about a micrometre.
+   . Smoothing lowers a summit cell by about a micrometre.
     """
     lo, hi = dem.meta.elevation_range
     assert lo >= 267.0 and hi <= 298.0

@@ -8,7 +8,7 @@ once.
 Three things around that turn a number into a trustworthy number.
 
 **Snapping.** A pond location named in lon/lat almost never lands exactly on the routed
-channel -- and the channel itself moves between grid resolutions, by around 90 m on this
+channel, and the channel itself moves between grid resolutions, by around 90 m on this
 sheet. So the outlet is snapped to the largest accumulation nearby, with the search
 radius scaled to the contour spacing rather than fixed (PLAN §11.4).
 
@@ -56,7 +56,7 @@ class DonorIndex:
 
     `receivers` answers "where does this cell send its water"; delineation needs the
     opposite. Built once per flow field with a single argsort, then every catchment costs
-    time proportional to its own size rather than to the whole map -- which matters in
+    time proportional to its own size rather than to the whole map. That matters in
     Phase 6, where a dozen candidate sites are delineated against one flow field.
     """
 
@@ -87,7 +87,7 @@ def upstream_mask(
     the worst case and Python's recursion limit is 1,000.
 
     No visited-set is needed. Each cell has exactly one receiver, so the flow graph is a
-    forest and each cell appears in the donor list exactly once -- the traversal cannot
+    forest and each cell appears in the donor list exactly once, so the traversal cannot
     reach the same cell twice.
     """
     donors = donor_index.donors.tolist()
@@ -121,8 +121,8 @@ def edge_contact_ratio(mask: np.ndarray, nodata: np.ndarray) -> float:
     a true length ratio and keeps it comparable between grid resolutions.
 
     A side is "edge contact" when what lies beyond it is no-data *or* off the array. Both
-    mean the same thing -- the catchment continues into ground the contours never
-    described -- and testing only the array border is the mistake that reported the 395 ha
+    mean the same thing, which is that the catchment carries on into ground the contours
+    never described. Testing only the array border is the mistake that reported the 395 ha
     basin as complete (PLAN §11.3).
     """
     if not mask.any():
@@ -171,13 +171,13 @@ class Catchment:
 
     Measured against the *outlet*, not the catchment minimum. A contour-derived DEM has
     unfilled pits scattered through it, some of them below the outlet, so max-minus-min
-    reports a drop the water never has -- about 4 m too much on every site of the sample
+    reports a drop the water never has, about 4 m too much on every site of the sample
     sheet.
     """
 
     longest_flow_path_m: float
     """Distance from the hydraulically most remote cell to the outlet, along the flow
-    path -- the `L` in Phase 7's time of concentration."""
+    path. This is the `L` in Phase 7's time of concentration."""
 
     flow_path_cell: int
     """Flat index of that most remote cell. Phase 8 walks the receivers down from it to
@@ -232,8 +232,8 @@ class EnsembleResult:
 class CatchmentDelineator:
     """Delineates catchments against a single flow field.
 
-    Holds the donor index, so delineating many candidate sites against one grid -- which
-    is exactly what Phase 6 does -- pays the reverse-index cost once.
+    Holds the donor index, so delineating many candidate sites against one grid pays the
+    reverse-index cost once. That is exactly what Phase 6 does.
     """
 
     def __init__(self, flow: FlowField, *, config: CatchmentConfig | None = None) -> None:
@@ -260,7 +260,7 @@ class CatchmentDelineator:
     def snap_outlet(self, lon: float, lat: float) -> tuple[tuple[int, int], float]:
         """Move a requested point to the largest accumulation within the snap radius.
 
-        Returns the cell and how far it moved, so the caller can see -- and report -- that
+        Returns the cell and how far it moved, so the caller can see, and report, that
         the answer is not for the point that was asked about.
         """
         row, col = self.dem.index_of_lonlat(lon, lat)
@@ -314,7 +314,7 @@ class CatchmentDelineator:
         requested: tuple[float, float] | None = None,
         snap_distance_m: float = 0.0,
     ) -> Catchment:
-        """Delineate from a grid cell directly -- the entry point Phase 6 uses, since its
+        """Delineate from a grid cell directly. This is the entry point Phase 6 uses, since its
         candidates come from the accumulation grid rather than from a coordinate."""
         shape = self.dem.shape
         outlet = row * shape[1] + col
@@ -434,8 +434,8 @@ class CatchmentEnsemble:
         """Confidence from the coefficient of variation.
 
         A relative measure, so a 20 ha spread means something different on a 400 ha basin
-        than on a 30 ha one. Site 4 of the sample scores 14.1 +/- 15.4 ha -- a CV above 1
-        -- and is rejected on this rule alone.
+        than on a 30 ha one. A site scoring 14.1 +/- 15.4 ha has a CV above 1 and is
+        rejected on this rule alone.
         """
         if mean <= 0:
             return "low"
