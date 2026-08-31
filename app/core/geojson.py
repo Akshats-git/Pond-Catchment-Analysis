@@ -6,11 +6,11 @@ Three problems, in order.
 *edges* rather than interpolating a contour through cell centres: for every cell in the
 mask, each side facing out of the mask is a directed segment, oriented so the interior
 lies to its left. Chaining those segments end to end gives closed rings whose enclosed
-area is exactly the mask's area -- no half-cell is gained or lost before simplification --
-and the orientation falls out right for free: exteriors counter-clockwise, holes
-clockwise, which is what RFC 7946 asks for.
+area is exactly the mask's area, so no half-cell is gained or lost before
+simplification. The orientation falls out right for free: exteriors counter-clockwise and
+holes clockwise, which is what RFC 7946 asks for.
 
-**Simplification.** The traced ring is a staircase with one vertex per cell edge -- 40,000
+**Simplification.** The traced ring is a staircase with one vertex per cell edge, 40,000
 of them on the sample's largest basin, which no browser wants. Douglas-Peucker in
 projected metres removes the staircase. The tolerance is kept below one cell on purpose:
 under that, a moved vertex cannot cross into a neighbouring cell, so the area the ring
@@ -20,7 +20,7 @@ so rather than silently shipping a different shape.
 
 **Projection.** Rings are traced and simplified in projected metres, where distances mean
 something, and converted to lon/lat once at the end. Coordinates are rounded to six
-decimal places -- about 0.1 m, finer than any grid this service builds.
+decimal places, about 0.1 m, which is finer than any grid this service builds.
 
 Everything emitted is a plain `dict` of Python scalars: the numbers cross a JSON boundary
 next, and a numpy float32 does not survive that.
@@ -59,8 +59,8 @@ __all__ = [
 
 _MAX_TOLERANCE_DOUBLINGS = 12
 """Ceiling on the search for a tolerance that fits the vertex budget. Twelve doublings is
-a factor of 4,096 -- past the width of any sheet this service accepts -- and bounding the
-loop matters more than the exact figure: a mask of many small pieces cannot be thinned
+a factor of 4,096, past the width of any sheet this service accepts. Bounding the loop
+matters more than the exact figure: a mask of many small pieces cannot be thinned
 below four vertices each, so the budget is sometimes simply unreachable."""
 
 
@@ -127,7 +127,7 @@ def trace_rings(mask: np.ndarray) -> TracedRings:
     Rings are exact: every vertex is a cell corner, so the enclosed area is the mask's
     area to the last square metre. Exteriors come back counter-clockwise and holes
     clockwise, which is the winding RFC 7946 requires and also the cheapest way to tell
-    one from the other -- the sign of the enclosed area.
+    one from the other, by the sign of the enclosed area.
     """
     if not mask.any():
         raise GeoJSONError(
@@ -276,8 +276,8 @@ def _thin(ring: list, tolerance_m: float) -> list:
     """Simplify a closed ring, keeping it a ring.
 
     A pond only a few cells across can be thinned below the three distinct points a
-    polygon needs. Rather than drop it -- which would lose the geometry that matters most
-    at a village scale -- the traced staircase is kept as it is: blocky, but true.
+    polygon needs. Dropping it would lose the geometry that matters most at a village
+    scale, so the traced staircase is kept as it is: blocky, but true.
     """
     thinned = _close(simplify(ring, tolerance_m))
     return thinned if len(thinned) >= 4 else _close(list(ring))
@@ -288,8 +288,8 @@ def mask_geometry(
 ) -> tuple[dict, tuple[str, ...]]:
     """A cell mask as a Polygon or MultiPolygon, plus any warnings about it.
 
-    Holes are placed inside the exterior that contains them -- a catchment can genuinely
-    have one, where a closed depression drains to itself -- and disjoint components become
+    Holes are placed inside the exterior that contains them, because a catchment can
+    genuinely have one where a closed depression drains to itself. Disjoint components become
     a MultiPolygon rather than being silently dropped.
     """
     cfg = config or settings.geojson
@@ -356,7 +356,7 @@ def mask_geometry(
 def flow_path_geometry(flow: FlowField, catchment: Catchment, dem: DEM) -> dict:
     """The longest flow path as a LineString, from the most remote cell to the outlet.
 
-    Walked down the receiver pointers, which is the same path `Catchment` measured -- so
+    Walked down the receiver pointers, which is the same path `Catchment` measured, so
     the drawn line and the reported length are the same object, not two estimates of one.
     """
     receivers = flow.receivers
@@ -405,7 +405,7 @@ def catchment_feature(
         "relief_m": round(catchment.relief_m, 2),
         "longest_flow_path_m": round(catchment.longest_flow_path_m, 1),
         "resolution_m": catchment.resolution_m,
-        # simplestyle-spec, which geojson.io and Leaflet plugins both understand -- the
+        # simplestyle-spec, which geojson.io and Leaflet plugins both understand. The
         # accept test for this phase is that the output *looks* right when dropped on a map.
         "stroke": "#1f78b4",
         "fill": "#a6cee3",
@@ -461,6 +461,11 @@ def outlet_feature(site: PondSite, balance: WaterBalance | None = None) -> dict:
         "confidence": site.confidence,
         "slope_pct": round(site.score.slope * 100, 2),
         "relative_elevation_m": round(site.score.relative_elevation_m, 2),
+        "height_above_watercourse_m": (
+            round(site.score.height_above_trunk_m, 2)
+            if math.isfinite(site.score.height_above_trunk_m)
+            else None
+        ),
         "snap_distance_m": round(site.catchment.snap_distance_m, 1),
         "marker-color": "#08519c" if site.rank == 1 else "#6baed6",
         "marker-symbol": "water",
@@ -542,8 +547,8 @@ def build_geojson(
 ) -> dict:
     """The whole response geometry: the recommended site in full, alternates in outline.
 
-    Features come out in draw order -- catchments first, then lines, then the points that
-    sit on top of them -- because most renderers, geojson.io included, honour it.
+    Features come out in draw order, with catchments first, then lines, then the points
+    that sit on top of them, because most renderers honour it. geojson.io does.
     """
     sites = list(sites)
     if not sites:

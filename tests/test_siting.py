@@ -1,8 +1,8 @@
-"""Phase 6 -- catchment-first pond siting.
+"""Phase 6. Catchment-first pond siting.
 
 Two kinds of evidence here. On synthetic surfaces the right answer is derivable by hand:
 a symmetric valley has exactly one buildable channel, and the best site on it is the
-furthest-downstream cell the edge buffer allows -- so the selector can be checked cell by
+furthest-downstream cell the edge buffer allows, so the selector can be checked cell by
 cell rather than plausibility-checked.
 
 On the real sheet the tests are about the two mistakes this phase exists to avoid. Both
@@ -33,14 +33,19 @@ from tests.test_terrain import synthetic_dem
 
 SAMPLE = "data/contours_1m.kml"
 
-# PLAN §3, "Results on the provided contour map": the prototype run this phase has to
-# reproduce. (area_ha, ensemble_mean_ha, ensemble_std_ha, confidence)
-PUBLISHED_SITES = [
-    (395.4, 423.5, 17.6, "high"),
-    (101.8, 102.8, 1.5, "high"),
-    (37.1, 37.3, 0.1, "high"),
-    (35.7, 14.1, 15.4, "low"),
-    (30.4, 31.6, 0.8, "high"),
+# The five sites the sample sheet returns on the 5 m ensemble grid, as
+# (area_ha, ensemble_mean_ha, ensemble_std_ha, confidence).
+#
+# These replaced the table in PLAN §3. That table was produced before the watercourse
+# rule existed, so its first site was the Shivnath itself: 395 ha of a 831 ha sheet,
+# outlet in the middle of the river. Every entry below stands clear of the river, which
+# is the whole reason the numbers moved.
+REFERENCE_SITES = [
+    (119.7, 120.3, 0.7, "high"),
+    (37.5, 63.7, 17.9, "medium"),
+    (18.4, 21.3, 2.0, "high"),
+    (18.1, 18.3, 0.1, "high"),
+    (12.9, 13.1, 1.2, "high"),
 ]
 
 
@@ -82,8 +87,8 @@ def test_only_the_channel_is_a_candidate():
 
     assert candidates.any()
     assert set(np.flatnonzero(candidates.any(axis=0))) == {20}
-    # The hillslope cells next to the channel do carry more than the 0.5% threshold --
-    # it is the slope rule, not the stream rule, that excludes them.
+    # The hillslope cells next to the channel do carry more than the 0.5% threshold.
+    # It is the slope rule, not the stream rule, that excludes them.
     assert selector.stream_mask()[:, 19].any()
     assert not selector.buildable_mask()[:, 19].any()
 
@@ -145,7 +150,7 @@ def test_top_n_is_clamped_to_the_configured_maximum():
 
 def test_selection_is_deterministic():
     """Equal-area basins are broken by cell index, so the same sheet always gives the
-    same list -- a report that changes between runs cannot be checked."""
+    same list. A report that changes between runs cannot be checked."""
     dem = valley(channels=(10, 30))
     first = selector_for(dem).select(2)
     second = selector_for(dem).select(2)
@@ -214,7 +219,7 @@ def test_percentile_ranked_accumulation_would_be_degenerate(selector):
     """PLAN §11.6, reproduced rather than asserted.
 
     Flow accumulation is so skewed that the 98th percentile of it is a hollow draining
-    under half the stream threshold -- ranking on percentiles scores such a hollow
+    under half the stream threshold. Ranking on percentiles scores such a hollow
     alongside a 320 ha valley. The absolute threshold is what stops that.
     """
     upstream = selector.upstream_area()[selector.dem.valid]
@@ -238,8 +243,8 @@ def test_square_window_suppression_returns_one_stream_five_times(flow):
         for j in range(i + 1, len(masks))
         if (masks[i] & masks[j]).any()
     ]
-    assert len(nested) == 10, "every pair should overlap -- that is the bug"
-    assert all(s.catchment.area_ha > 300 for s in windowed.sites)
+    assert len(nested) == 10, "every pair should overlap, which is the bug"
+    assert all(s.catchment.area_ha > 90 for s in windowed.sites)
 
 
 def test_catchment_suppression_returns_independent_basins(sites):
@@ -251,65 +256,111 @@ def test_catchment_suppression_returns_independent_basins(sites):
 
 
 # --------------------------------------------------------------------------- #
-# The published results table
+# The reference results
 # --------------------------------------------------------------------------- #
-def test_reproduces_the_published_results_table(sites):
-    """PLAN §3, "Results on the provided contour map".
+def test_reproduces_the_reference_results(sites):
+    """The five sites the sample sheet returns, area and error bar together.
 
-    Sites 1, 3 and 4 come back on the published cell. Sites 2 and 5 come back one or two
-    cells upstream of it: the published outlets sit 20-25 m from the edge of the data and
-    the 30 m buffer of `SitingConfig.edge_buffer_m` excludes them, so the selector takes
-    the next cell up the same channel. The basins are the same basins -- each published
-    outlet's catchment contains the selected one -- which is why the tolerance below is
-    on the area rather than on the cell.
+    The tolerance is on the area rather than on the cell. An outlet can move a cell or
+    two up the same channel when anything about the grid changes, and that is not a
+    different answer; a basin that changes size by a fifth is.
     """
-    assert len(sites) == len(PUBLISHED_SITES)
-    for site, (area_ha, mean_ha, std_ha, confidence) in zip(sites, PUBLISHED_SITES):
+    assert len(sites) == len(REFERENCE_SITES)
+    for site, (area_ha, mean_ha, std_ha, confidence) in zip(sites, REFERENCE_SITES):
         assert site.catchment.area_ha == pytest.approx(area_ha, rel=0.20)
         assert site.ensemble.mean_area_ha == pytest.approx(mean_ha, rel=0.15)
         assert site.ensemble.std_area_ha == pytest.approx(std_ha, abs=1.5)
         assert site.confidence == confidence
 
 
-def test_the_published_sites_are_the_same_basins(sites, delineator, flow):
-    """Each selected site drains the basin the prototype reported.
+def test_no_site_stands_in_the_river(sites, selector):
+    """The bug this rule exists for.
 
-    Two independent checks: the selected outlet and the published one ultimately leave
-    the map at the same cell, and their catchments share at least 80% of their area.
-    Where the selector differs it has moved a cell or two along the same channel, not
-    found somewhere else."""
-    terminal = flow.terminal_outlets()
-    published_lonlat = [
-        (81.286465, 21.240094),
-        (81.293549, 21.263343),
-        (81.284248, 21.262484),
-        (81.297453, 21.240094),
-        (81.312393, 21.259544),
-    ]
-    for site, (lon, lat) in zip(sites, published_lonlat):
-        reference = delineator.delineate(lon, lat, snap=False)
-        assert terminal[site.catchment.outlet_rc] == terminal[reference.outlet_rc]
-        shared = int((site.catchment.mask & reference.mask).sum())
-        assert shared / max(site.catchment.cell_count, reference.cell_count) >= 0.80
+    Ranking by catchment area alone asks for the cell that the most water passes through,
+    and on a sheet with a river across it that cell is the river. The old top site was
+    395 ha of a 831 ha sheet with its outlet in the Shivnath. Every site now stands clear
+    of the trunk and a pond depth above it.
+    """
+    trunk = selector.trunk_mask()
+    assert trunk.any(), "the sample sheet does carry a watercourse over the threshold"
 
-
-def test_the_top_site_drains_almost_half_the_sheet(sites, selector):
-    best = sites[0]
-    assert best.rank == 1
-    assert best.catchment.area_m2 / selector.mapped_area_m2 == pytest.approx(0.47, abs=0.03)
-    assert best.confidence == "high" and best.is_recommended
+    for site in sites:
+        row, col = site.catchment.outlet_rc
+        assert not trunk[row, col]
+        assert (
+            site.score.height_above_trunk_m
+            >= settings.siting.min_height_above_trunk_m
+        )
+        # A cell on the trunk is one the rule already excluded, so nothing that survives
+        # it can drain more than the trunk threshold.
+        assert site.catchment.area_m2 < selector.trunk_threshold_m2
 
 
-def test_site_four_is_rejected_by_the_ensemble(sites):
-    """The acceptance criterion of Phase 6. On the primary grid site 4 is an ordinary
-    35.7 ha basin; the three grids put it at 14.1 +/- 15.4 ha, so it is returned flagged
-    rather than recommended."""
-    site = sites[3]
-    assert site.catchment.area_ha == pytest.approx(35.7, rel=0.05)
-    assert site.ensemble.coefficient_of_variation > 1.0
-    assert site.confidence == "low"
-    assert not site.is_recommended
-    assert any("disagree" in w for w in site.warnings)
+def test_the_trunk_is_the_river_and_only_the_river(selector):
+    """291 cells of a 133,000-cell grid: one channel, not a network.
+
+    The threshold is 150 ha of drainage, and on this sheet exactly one line crosses it.
+    That line is the Shivnath, which is what makes the exclusion narrow enough to be
+    safe. It removes a river, not the drainage network the ponds are meant to sit on.
+    """
+    trunk = selector.trunk_mask()
+    stream = selector.stream_mask()
+    assert 0 < trunk.sum() < 0.10 * stream.sum()
+    # Every trunk cell is on a stream by construction: the trunk threshold is 36 times
+    # the stream threshold.
+    assert not (trunk & ~stream).any()
+
+
+def test_a_sheet_with_no_watercourse_is_left_alone(selector):
+    """A farm-scale map has no channel over 150 ha, so the rule has nothing to exclude.
+
+    The threshold is absolute hectares for exactly this reason. A share of the sheet
+    would call the biggest gully on a 20 ha map a river and refuse to site anything.
+    """
+    small = selector_for(valley())
+    assert not small.trunk_mask().any()
+    assert np.isinf(small.height_above_trunk()).all()
+    assert (small.clear_of_watercourse_mask() == small.dem.valid).all()
+
+
+def test_ground_that_drains_off_the_sheet_is_not_assumed_clear(selector):
+    """A cell whose water leaves the map before reaching the trunk gets no clearance.
+
+    Its channel continues past the edge of the data and nothing here says how far below
+    it runs. On this sheet those cells are the strip along the near bank of the river,
+    which is precisely where a site must not go.
+    """
+    heights = selector.height_above_trunk()
+    off_map = np.isneginf(heights)
+
+    assert off_map.any(), "the river leaves this sheet, so some ground drains past it"
+    assert not (off_map & selector.clear_of_watercourse_mask()).any()
+    # And nothing on this sheet is marked "no watercourse below me", which is the value
+    # reserved for a map that carries no trunk at all.
+    assert not np.isposinf(heights).any()
+
+
+def test_the_ensemble_and_not_the_area_decides_confidence(sites):
+    """A site is flagged on the spread between grids, never on how big it is.
+
+    Site 2 is the demonstration: 37.5 ha on the primary grid, 63.7 +/- 17.9 ha across the
+    three, a coefficient of variation of 0.28. That is a medium, and it is what a reader
+    needs to know before acting on the number.
+    """
+    for site in sites:
+        cv = site.ensemble.coefficient_of_variation
+        if cv <= settings.catchment.confidence_high_cv:
+            assert site.confidence == "high"
+        elif cv <= settings.catchment.confidence_medium_cv:
+            assert site.confidence == "medium"
+        else:
+            assert site.confidence == "low"
+            assert not site.is_recommended
+            assert any("disagree" in w for w in site.warnings)
+
+    spread = sites[1]
+    assert spread.confidence == "medium"
+    assert spread.ensemble.coefficient_of_variation > settings.catchment.confidence_high_cv
 
 
 def test_edge_contact_is_reported_as_a_warning_not_a_rejection(sites):
@@ -330,6 +381,10 @@ def test_every_selected_site_obeys_the_siting_rules(sites, selector):
         assert site.score.slope < settings.siting.max_slope_fraction
         assert distance[row, col] >= settings.siting.edge_buffer_m
         assert site.score.upstream_area_m2 >= selector.stream_threshold_m2
+        assert (
+            site.score.height_above_trunk_m
+            >= settings.siting.min_height_above_trunk_m
+        )
         assert not selector.dem.nodata[row, col]
 
 
@@ -343,7 +398,7 @@ def test_the_convenience_wrapper_matches_the_selector(flow):
 
 
 # --------------------------------------------------------------------------- #
-# Fixtures -- the sample sheet is parsed once for the module
+# Fixtures. The sample sheet is parsed once for the module
 # --------------------------------------------------------------------------- #
 @pytest.fixture(scope="module")
 def surface():

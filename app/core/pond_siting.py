@@ -4,18 +4,22 @@ A pond is only as good as the water that reaches it, so the search starts from t
 drainage network rather than from the shape of the ground (PLAN §2, "Siting"):
 
 1. **Stream network.** A cell is on a stream when at least 0.5% of the mapped area
-   drains through it -- 4.2 ha on the sample sheet. The threshold is absolute and
+   drains through it, which is 4.2 ha on the sample sheet. The threshold is absolute and
    derived from the input, never a percentile of flow accumulation: accumulation is so
    skewed that percentile ranking scored 0.7 ha hollows at 0.98 alongside a 320 ha
    valley (PLAN §11.6).
-2. **Buildable ground.** Local slope under 3% -- steeper needs an uneconomic embankment
-   -- and at least 30 m inside the edge of valid data, so neither the pond nor its
-   catchment sits half off the map.
-3. **Rank by catchment area.** The biggest basin first; ordering by flow accumulation is
+2. **Buildable ground.** Local slope under 3%, because steeper ground needs an
+   embankment nobody will pay for, and at least 30 m inside the edge of the data, so
+   neither the pond nor its catchment sits half off the map.
+3. **Clear of the watercourse.** A channel that already drains more than 150 ha is a
+   nala or a river, not a field drain, and a site must stand a pond depth above the one
+   it runs into. See `clear_of_watercourse_mask` for why this rule exists and what it
+   is measured against.
+4. **Rank by catchment area.** The biggest basin first; ordering by flow accumulation is
    the same ordering, since accumulation counts exactly the cells the catchment mask
    collects.
-4. **Suppress the whole catchment of each pick.** Not a square window. A square window
-   returned five points strung along one stream -- 391, 361, 215, 202, 179 ha, every one
+5. **Suppress the whole catchment of each pick.** Not a square window. A square window
+   returned five points strung along one stream at 391, 361, 215, 202 and 179 ha, every one
    of them nested inside the first (PLAN §11.7). Removing the entire upstream mask makes
    the alternatives independent sub-basins, which is the only way a list of five sites
    means five choices.
@@ -25,9 +29,9 @@ argument is worth keeping: a cell downstream of a pick has *more* accumulation, 
 considered earlier; had it been chosen, the pick would already have been suppressed as
 part of its catchment.
 
-Every site carries the four numbers that chose it -- upstream area, slope, depression
-depth, relative elevation -- so the response can say why, not just where. The ensemble is
-what makes the list honest: site 4 of the sample looks like an ordinary 35.7 ha basin
+Every site carries the five numbers that chose it: upstream area, slope, depression
+depth, relative elevation and height above the watercourse. That is how the response can
+say why and not just where. The ensemble is what makes the list honest: site 4 of the sample looks like an ordinary 35.7 ha basin
 until three grids disagree about it by more than its own size, and it is returned flagged
 rather than quietly recommended.
 """
@@ -73,10 +77,10 @@ class SitingError(Exception):
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class SiteScore:
-    """The four measurements behind a pick, kept so the answer can be explained."""
+    """The five measurements behind a pick, kept so the answer can be explained."""
 
     upstream_area_m2: float
-    """Latitude-weighted area of the delineated catchment -- the ranking key.
+    """Latitude-weighted area of the delineated catchment. This is the ranking key.
 
     Ranking is done on the accumulation grid, which is the same set of cells weighted by
     row rather than per cell; the two agree to under 0.01% on this sheet, and this is the
@@ -89,7 +93,7 @@ class SiteScore:
     depression_depth_m: float
     """How deep the natural hollow at this cell is: filled elevation minus surveyed.
 
-    Zero on a channel, which is where catchment-first siting puts most sites -- those
+    Zero on a channel, which is where catchment-first siting puts most sites. Those
     ponds are excavated, and Phase 7 computes their capacity from the target depth
     instead. Quantised to the contour interval, so read it as "about a metre", not as a
     survey.
@@ -100,6 +104,13 @@ class SiteScore:
 
     Negative means the site sits below its surroundings, which is what a pond wants:
     water arrives by gravity and the embankment has something to key into.
+    """
+
+    height_above_trunk_m: float
+    """How far the site stands above the watercourse it drains into.
+
+    `inf` on a sheet with no watercourse on it, which is the honest reading: there is
+    nothing here for the pond to be too close to. See `clear_of_watercourse_mask`.
     """
 
 
@@ -146,7 +157,10 @@ class SitingResult:
     stream_threshold_m2: float
     stream_cells: int
     buildable_cells: int
+    clear_of_watercourse_cells: int
     candidate_cells: int
+    trunk_cells: int
+    trunk_threshold_m2: float
     resolution_m: float
     warnings: tuple[str, ...] = ()
 
@@ -163,7 +177,7 @@ class SitingResult:
 # Selection
 # --------------------------------------------------------------------------- #
 class PondSiteSelector:
-    """Runs the four steps against one flow field.
+    """Runs the five steps against one flow field.
 
     The delineator is shared, so the reverse-D8 index is built once and each candidate
     costs the size of its own catchment. That is what makes suppression affordable: the
@@ -184,6 +198,7 @@ class PondSiteSelector:
         self.delineator = delineator or CatchmentDelineator(flow)
         self.ensemble = ensemble
         self._relative_elevation: np.ndarray | None = None
+        self._height_above_trunk: np.ndarray | None = None
 
     @classmethod
     def from_ensemble(
@@ -202,7 +217,7 @@ class PondSiteSelector:
     # ------------------------------------------------------------------ #
     @property
     def mapped_area_m2(self) -> float:
-        """Ground area the contours actually describe -- the denominator of step 1."""
+        """Ground area the contours actually cover. The denominator of step 1."""
         return self.dem.area_of(self.dem.valid)
 
     @property
@@ -241,8 +256,100 @@ class PondSiteSelector:
             & (self.distance_to_edge_m() >= self.config.edge_buffer_m)
         )
 
+    @property
+    def trunk_threshold_m2(self) -> float:
+        """Upstream area above which a channel counts as a watercourse."""
+        return self.config.trunk_drainage_area_ha * 1e4
+
+    def trunk_mask(self) -> np.ndarray:
+        """Cells on a channel that already drains more than the trunk threshold.
+
+        The threshold is absolute hectares rather than a share of the sheet, and that is
+        the whole point. A share would scale with whatever was uploaded, so the biggest
+        channel on a 20 ha farm map would be called a river and the rule would refuse to
+        put a pond anywhere. A watercourse is a watercourse at 150 ha whether the sheet
+        around it is 200 ha or 200 km^2.
+        """
+        return self.dem.valid & (self.upstream_area() >= self.trunk_threshold_m2)
+
+    def height_above_trunk(self) -> np.ndarray:
+        """(ny, nx) height of each cell above the watercourse it drains into.
+
+        Height above nearest drainage, measured along the flow path rather than as a
+        straight line: the number that matters is how far the pond bed stands above the
+        channel that would flood it, and water gets there by flowing, not by the shortest
+        route.
+
+        Resolved in one pass up the topological order, the same trick
+        `FlowField.terminal_outlets` uses. In ascending elevation every cell's receiver is
+        already resolved, so a cell either is trunk (and stands zero above itself) or
+        inherits whatever its receiver found.
+
+        Two cases have no answer, and they are opposite ones. A sheet with no channel over
+        the trunk threshold maps no watercourse at all, so every cell gets `inf`: there is
+        nothing here to be too close to. On a sheet that does map one, a cell whose water
+        leaves the sheet before reaching it gets `-inf` instead. Such a cell sits at the
+        edge of the data with an unknown channel just beyond it, which is not the same as
+        standing clear of one, and on the provided sheet those cells are exactly the strip
+        along the near bank of the river.
+        """
+        trunk_mask = self.trunk_mask()
+        if not trunk_mask.any():
+            return np.full(self.dem.shape, np.inf)
+
+        trunk = trunk_mask.ravel().tolist()
+        receivers = self.flow.receivers.tolist()
+        elevation = self.dem.z.ravel().tolist()
+
+        # Lists rather than arrays: this is a serial pointer walk, and indexing a numpy
+        # array one element at a time in a 600,000-iteration Python loop costs several
+        # times what indexing a list does.
+        channel_z = [float("nan")] * len(receivers)
+        for cell in self.flow.order.tolist()[::-1]:
+            if trunk[cell]:
+                channel_z[cell] = elevation[cell]
+            else:
+                target = receivers[cell]
+                channel_z[cell] = channel_z[target] if target >= 0 else float("inf")
+
+        below = np.asarray(channel_z, dtype=np.float64).reshape(self.dem.shape)
+        with np.errstate(invalid="ignore"):
+            return self.dem.z - below
+
+    @property
+    def height_above_trunk_grid(self) -> np.ndarray:
+        """`height_above_trunk()`, computed once. It is a serial pass over every valid
+        cell, which is the most expensive thing in this module."""
+        if self._height_above_trunk is None:
+            self._height_above_trunk = self.height_above_trunk()
+        return self._height_above_trunk
+
+    def clear_of_watercourse_mask(self) -> np.ndarray:
+        """Ground that stands far enough above the nearest watercourse to hold a pond.
+
+        This is the rule that keeps site 1 out of the river. Ranking purely by catchment
+        area asks for the cell that the most water passes through, and on any sheet that
+        contains a river the answer is the river: on the provided map the top site landed
+        in the Shivnath, 418 ha of a 831 ha sheet, and the "pond" was a 2.4 million m^3
+        impoundment across a live channel.
+
+        Two conditions, both needed. The cell must not be on the trunk itself, and it must
+        stand `min_height_above_trunk_m` above the trunk cell it drains into, so the pond
+        bed clears the channel and its floodplain. Checked against the OpenStreetMap water
+        layer over the provided sheet: 310 of 2,413 candidate cells (12.8%) stood in the
+        river before this rule and 9 of 754 (1.2%) after it.
+
+        On a sheet with no channel over the trunk threshold every height is `inf` and the
+        mask is simply the valid area, so a farm-scale map is unaffected.
+        """
+        return self.dem.valid & (
+            self.height_above_trunk_grid >= self.config.min_height_above_trunk_m
+        )
+
     def candidate_mask(self) -> np.ndarray:
-        return self.stream_mask() & self.buildable_mask()
+        return (
+            self.stream_mask() & self.buildable_mask() & self.clear_of_watercourse_mask()
+        )
 
     # ------------------------------------------------------------------ #
     # Scoring
@@ -286,6 +393,7 @@ class PondSiteSelector:
             # clamp is against float noise on cells the fill did not touch.
             depression_depth_m=max(0.0, depression),
             relative_elevation_m=float(self.relative_elevation_grid[row, col]),
+            height_above_trunk_m=float(self.height_above_trunk_grid[row, col]),
         )
 
     # ------------------------------------------------------------------ #
@@ -299,9 +407,10 @@ class PondSiteSelector:
         # over the whole grid, and the diagnostics want the same arrays the loop used.
         stream = self.stream_mask()
         buildable = self.buildable_mask()
-        candidates = stream & buildable
+        clear = self.clear_of_watercourse_mask()
+        candidates = stream & buildable & clear
         if not candidates.any():
-            raise SitingError(*self._no_candidates_reason(stream, buildable))
+            raise SitingError(*self._no_candidates_reason(stream, buildable, clear))
 
         available = candidates.copy()
         ranked = self._ranked_candidates(candidates)
@@ -335,7 +444,10 @@ class PondSiteSelector:
             stream_threshold_m2=self.stream_threshold_m2,
             stream_cells=int(stream.sum()),
             buildable_cells=int(buildable.sum()),
+            clear_of_watercourse_cells=int(clear.sum()),
             candidate_cells=int(candidates.sum()),
+            trunk_cells=int(self.trunk_mask().sum()),
+            trunk_threshold_m2=self.trunk_threshold_m2,
             resolution_m=self.dem.resolution_m,
             warnings=tuple(warnings),
         )
@@ -344,8 +456,8 @@ class PondSiteSelector:
         """Score one caller-supplied pour point, bypassing the ranking entirely.
 
         Phase 9 lets a planner name a place they have already chosen. The point still
-        snaps to the routed channel -- a catchment delineated from a cell beside the
-        stream is the hillside, not the basin -- and the site reports how far it moved,
+        snaps to the routed channel, because a catchment traced from a cell beside the
+        stream is the hillside and not the basin. The site reports how far it moved,
         so the answer never silently describes somewhere else.
 
         Raises `ValueError` when the point lies off the mapped area or has no valid data
@@ -359,7 +471,7 @@ class PondSiteSelector:
         """Ground this pick takes out of the pool (step 4).
 
         Normally the pick's entire upstream catchment. With
-        `suppression_removes_catchment` off it is a square window instead -- the
+        `suppression_removes_catchment` off it is a square window instead. That is the
         rejected alternative, kept so PLAN §11.7 can be re-run rather than merely
         asserted: on the sample it returns five nested points on a single stream.
         """
@@ -384,7 +496,7 @@ class PondSiteSelector:
         """Candidate cells as flat indices, most upstream area first.
 
         Sorted on accumulation rather than on delineated area so the ordering costs one
-        argsort instead of one traversal per candidate -- the two orderings are the same,
+        argsort instead of one traversal per candidate. The two orderings are the same,
         since accumulation counts the cells the mask collects. `stable` keeps ties in
         index order, so the same sheet always produces the same list.
         """
@@ -420,9 +532,9 @@ class PondSiteSelector:
         )
 
     def _no_candidates_reason(
-        self, stream: np.ndarray, buildable_mask: np.ndarray
+        self, stream: np.ndarray, buildable_mask: np.ndarray, clear_mask: np.ndarray
     ) -> tuple[str, str, str]:
-        """Say which of the three rules emptied the pool -- the useful half of the error."""
+        """Say which rule emptied the pool. That is the useful half of the error."""
         streams = int(stream.sum())
         buildable = int(buildable_mask.sum())
         threshold_ha = self.stream_threshold_m2 / 1e4
@@ -439,6 +551,20 @@ class PondSiteSelector:
                 f"No ground is both under {self.config.max_slope_fraction:.0%} slope and "
                 f"more than {self.config.edge_buffer_m:.0f} m inside the mapped area.",
                 "The terrain is too steep, or the mapped area too narrow, for a pond.",
+            )
+        if not (stream & buildable_mask & clear_mask).any() and (
+            stream & buildable_mask
+        ).any():
+            return (
+                "no_ground_clear_of_watercourse",
+                f"Every buildable channel on this sheet lies within "
+                f"{self.config.min_height_above_trunk_m:.0f} m of a watercourse "
+                f"draining more than {self.config.trunk_drainage_area_ha:.0f} ha. A pond "
+                "there would sit in the channel or its floodplain.",
+                "The sheet may be all river floodplain. Raise "
+                "POND_SITING_TRUNK_DRAINAGE_AREA_HA, or lower "
+                "POND_SITING_MIN_HEIGHT_ABOVE_TRUNK_M, if the watercourse here is small "
+                "enough to build across.",
             )
         return (
             "no_site_found",

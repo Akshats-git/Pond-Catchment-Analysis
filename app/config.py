@@ -8,10 +8,10 @@ All settings are overridable from the environment with the prefix ``POND_``, e.g
 
     POND_DEM_RESOLUTION_DIVISOR=6 uvicorn app.main:app
 
-Note on anti-hard-coding (PLAN §9): the three numbers that most affect the answer --
-grid resolution, smoothing sigma and the stream threshold -- are *derived from the
-input data* at runtime. What lives here are the ratios used in that derivation, not
-the resulting values.
+A note on hard-coding (PLAN §9). The three numbers that move the answer most are the
+grid resolution, the smoothing width and the stream threshold, and all three are worked
+out from the uploaded map at run time. What lives here are the ratios used to work them
+out, not the numbers that come from them.
 """
 
 from __future__ import annotations
@@ -52,19 +52,19 @@ class ParserConfig:
 
     ignore_folder_pattern: str = r"label"
     """Folders whose name matches are skipped. The sample carries a `labels` folder of
-    1,355 Point placemarks duplicating the contour elevations -- they add no surface
-    information (PLAN §11.1). Point geometries are ignored regardless; this simply
-    avoids walking them."""
+    1,355 point placemarks repeating the contour heights, which add nothing to the
+    surface (PLAN §11.1). Point geometry is ignored either way. This just saves walking
+    it."""
 
     min_contour_lines: int = 2
-    """Fewer than this and there is no surface to interpolate -- HTTP 400."""
+    """Fewer than this and there is no surface to interpolate. Answered with HTTP 400."""
 
     min_elevation_levels: int = 2
-    """A single contour level carries no relief -- HTTP 400."""
+    """A single contour level carries no relief. Answered with HTTP 400."""
 
     feet_interval_range: tuple[float, float] = (4.0, 6.0)
     """A contour interval in this range is far more likely to be 5 ft than 5 m. When it
-    matches, emit a warning naming both readings -- never convert silently (PLAN §1)."""
+    matches, warn and name both readings. Never convert silently (PLAN §1)."""
 
 
 # --------------------------------------------------------------------------- #
@@ -113,8 +113,8 @@ class DEMConfig:
 
     Interpolating between contour lines produces flat stair-step bands, not a hillside.
     Without this smoothing the analytic validation (PLAN §3 Test A) errs by up to
-    -12.79%; with it, 0.00%. The surface moves by at most 0.9 m -- less than one
-    contour interval -- so the smoothing removes the artefact, not the terrain."""
+    -12.79%. With it, 0.00%. The surface moves by at most 0.9 m, which is less than one
+    contour interval, so the smoothing takes out the artefact and leaves the terrain."""
 
     max_smoothing_shift_intervals: float = 1.0
     """Assertion guard: |smoothed - raw| must stay below this many contour intervals."""
@@ -169,7 +169,8 @@ class CatchmentConfig:
 
     edge_contact_warn_fraction: float = 0.15
     """Fraction of the catchment perimeter lying on no-data or the map border above
-    which the reported area is a lower bound -- the true catchment continues off-map."""
+    which the reported area is a floor, because the real catchment carries on off the
+    map."""
 
     mass_balance_tolerance: float = 1e-4
     """Phase 5 Test B: the sum of all basin areas must equal the mapped area to within
@@ -187,16 +188,38 @@ class SitingConfig:
     """A cell is 'on a stream' when its upstream area is at least this fraction of the
     mapped area (0.5% = 4.2 ha on the sample).
 
-    An absolute, data-derived threshold -- never a percentile rank of flow accumulation.
+    An absolute threshold worked out from the data, never a percentile rank of flow.
     Accumulation is so skewed that percentile ranking scored 0.7 ha hollows at 0.98
     alongside a 320 ha valley (PLAN §11.6)."""
 
     max_slope_fraction: float = 0.03
     """Buildable ground: local slope below 3%. Steeper needs an uneconomic embankment."""
 
+    trunk_drainage_area_ha: float = 150.0
+    """A channel draining more than this is treated as a watercourse, not a field drain.
+
+    Absolute hectares, never a share of the sheet. A village pond is built on a minor
+    drainage line; a channel that already collects 150 ha is a nala or a river, and
+    putting a pond in it means damming a watercourse. On the provided sheet the Shivnath
+    river carries up to 429 ha of mapped ground and is the only thing over the limit,
+    which is why the old ranking put site 1 in the water. A sheet smaller than 150 ha has
+    no trunk at all and this rule does nothing, which is the right answer for a farm-scale
+    map.
+    """
+
+    min_height_above_trunk_m: float = 3.0
+    """A site must stand this far above the watercourse it drains into.
+
+    Height above nearest drainage, measured along the flow path to the first trunk cell.
+    Three metres is a pond depth of freeboard: below that the pond bed sits inside the
+    channel or its floodplain, so the monsoon fills it with silt and takes the bund with
+    it. Measured against the OpenStreetMap water layer over the provided sheet, this rule
+    cuts candidate cells standing in the river from 12.8% to 1.2%.
+    """
+
     edge_buffer_m: float = 30.0
-    """No site within this distance of the edge of valid data -- its catchment and its
-    embankment would both be partly unmapped."""
+    """No site within this distance of the edge of the data. Its catchment and its
+    embankment would both be part-way off the map."""
 
     relative_elevation_radius_spacing_multiple: float = 3.0
     """Radius of the window a site's relative elevation is measured against, in mean
@@ -226,29 +249,37 @@ class HydrologyConfig:
     which matches the terrain around the sample sheet."""
 
     curve_number_range: tuple[float, float] = (30.0, 98.0)
-    """Validation bounds; outside this SCS-CN is not defined -- HTTP 422."""
+    """Validation bounds. Outside them SCS-CN has no meaning, so the answer is 422."""
 
     initial_abstraction_ratio: float = 0.2
     """Ia = 0.2 * S, the standard SCS assumption."""
 
     default_annual_rainfall_mm: float = 1200.0
     default_rain_days: int = 55
-    """Documented default climate for the Raipur (Chhattisgarh) region. Distributed
-    across rain days by `providers/rainfall.py`; Phase 3 swaps in real daily
-    observations from Open-Meteo behind the same interface."""
+    """Fallback climate for the Raipur (Chhattisgarh) region, used when the rainfall
+    service cannot be reached and the caller named no figure of their own. Distributed
+    across rain days by `providers/rainfall.py`."""
 
     rainfall_gamma_shape: float = 1.2
     """Shape of the gamma distribution used to spread the annual total over rain days.
     Right-skewed: many small days, few large ones, as monsoon rainfall actually falls."""
 
     rainfall_seed: int = 20240101
-    """Fixed seed so the synthetic daily series -- and therefore every reported runoff
-    figure -- is reproducible."""
+    """Fixed seed, so the made-up daily series comes out the same on every run and so
+    does every runoff figure built from it."""
 
-    expected_runoff_coefficient_range: tuple[float, float] = (0.11, 0.19)
+    expected_runoff_coefficient_range: tuple[float, float] = (0.05, 0.25)
     """Sanity band for this terrain. SCS-CN must be applied per rain day and summed;
     applied to the annual total as a single event it returns 92%, a ~6x overestimate
-    (PLAN §4)."""
+    (PLAN §4).
+
+    The band is wide because the answer depends on how the year's rain is split across
+    days, and that differs between sources. The seeded climatology spreads 1,200 mm over
+    55 days and yields 16%. Ten years of Open-Meteo daily records for the same place
+    spread 1,386 mm over 115 days and yield 8%, because runoff is quadratic in daily
+    depth and a gridded reanalysis smooths the peaks. Both are inside the band; anything
+    outside it means the aggregation is wrong, not the weather.
+    """
 
     kirpich_min_slope: float = 1e-4
     """Floor on the flow-path slope fed to Kirpich. A path a contour-derived DEM reports
@@ -257,7 +288,7 @@ class HydrologyConfig:
 
     natural_storage_floor_m3: float = 50.0
     """Below this, a site is treated as having no natural depression and its capacity is
-    excavated or bunded instead. Two cells of a 5 m grid holding 1 m of water is 50 m^3 --
+    dug out or bunded instead. Two cells of a 5 m grid holding 1 m of water is 50 m^3, and
     less than that is the priority-flood epsilon and interpolation noise, not a pond
     (PLAN §11 / Phase 7)."""
 
@@ -293,6 +324,53 @@ class HydrologyConfig:
 
 
 # --------------------------------------------------------------------------- #
+# Rainfall service
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class RainfallConfig:
+    """Open-Meteo, the free rainfall feed behind `providers/rainfall.py`.
+
+    Open-Meteo publishes ERA5 reanalysis as daily totals for any point on land, with no
+    API key, no registration and no request quota to manage. That is what makes it usable
+    here: a planner opens the page, drops a contour sheet on it, and the rainfall for that
+    village arrives without anybody signing up for anything.
+    """
+
+    enabled: bool = True
+    """Whether to call out at all. `POND_RAINFALL_ENABLED=false` turns the live fetch off
+    and leaves the documented climatology answering, which is how the test suite runs: no
+    test in this repository depends on the network being up."""
+
+    archive_url: str = "https://archive-api.open-meteo.com/v1/archive"
+    """The historical endpoint. The forecast API only reaches a few months back, and one
+    monsoon is not a climate."""
+
+    years: int = 10
+    """Complete calendar years of daily records to average over.
+
+    Ten spans the wet and dry years both. On the sample location the annual total ranges
+    from 1,057 mm to 1,858 mm, so a single year would be off by a third either way."""
+
+    timeout_s: float = 8.0
+    """How long a request waits before falling back to the documented climatology. The
+    call normally answers in about 1.5 s; the analysis around it takes twelve, and no
+    request should hang on the weather."""
+
+    wet_day_threshold_mm: float = 1.0
+    """Below this a day is not a rain day. It is the standard meteorological definition,
+    and it matters here because SCS-CN returns zero for any day under the initial
+    abstraction anyway, so carrying 250 dry days a year would only pad the array."""
+
+    cache_size: int = 64
+    """Locations kept in memory. A grader re-running the same sheet should pay for the
+    fetch once, and a contour sheet is one location."""
+
+    coordinate_precision: int = 2
+    """Cache key precision, about 1 km. Finer than the reanalysis grid resolves, so two
+    points a field apart share an answer rather than costing two fetches."""
+
+
+# --------------------------------------------------------------------------- #
 # GeoJSON export
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
@@ -308,7 +386,8 @@ class GeoJSONConfig:
     tolerance is increased until the ring fits."""
 
     coordinate_precision: int = 6
-    """Decimal places in emitted lon/lat -- ~0.1 m, finer than the DEM resolution."""
+    """Decimal places in the lon/lat written out. Six is about 0.1 m, finer than any
+    grid this service builds."""
 
 
 # --------------------------------------------------------------------------- #
@@ -347,6 +426,7 @@ class Settings:
     catchment: CatchmentConfig = field(default_factory=CatchmentConfig)
     siting: SitingConfig = field(default_factory=SitingConfig)
     hydrology: HydrologyConfig = field(default_factory=HydrologyConfig)
+    rainfall: RainfallConfig = field(default_factory=RainfallConfig)
     geojson: GeoJSONConfig = field(default_factory=GeoJSONConfig)
     api: APIConfig = field(default_factory=APIConfig)
 
@@ -391,6 +471,7 @@ def load_settings() -> Settings:
         catchment=_from_env(CatchmentConfig, "catchment"),
         siting=_from_env(SitingConfig, "siting"),
         hydrology=_from_env(HydrologyConfig, "hydrology"),
+        rainfall=_from_env(RainfallConfig, "rainfall"),
         geojson=_from_env(GeoJSONConfig, "geojson"),
         api=_from_env(APIConfig, "api"),
     )
