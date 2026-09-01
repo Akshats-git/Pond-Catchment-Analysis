@@ -72,6 +72,27 @@ class SitingError(Exception):
         self.hint = hint
 
 
+def _validated_exclusion(
+    mask: np.ndarray | None, shape: tuple[int, int]
+) -> np.ndarray | None:
+    """Check an exclusion grid against the DEM before it can quietly mis-site a pond.
+
+    A mask of the wrong shape is a caller bug that numpy would either broadcast into
+    nonsense or reject deep inside a mask expression, so it is caught here where the
+    message can name both shapes.
+    """
+    if mask is None:
+        return None
+    if mask.shape != shape:
+        raise SitingError(
+            "exclusion_mask_shape",
+            f"The exclusion mask is {mask.shape} and the DEM is {shape}.",
+            "Build the mask on the same grid the analysis runs on; `DEM.shape` is in "
+            "the response under `dem.shape`.",
+        )
+    return mask.astype(bool)
+
+
 # --------------------------------------------------------------------------- #
 # Result types
 # --------------------------------------------------------------------------- #
@@ -191,18 +212,24 @@ class PondSiteSelector:
         config: SitingConfig | None = None,
         delineator: CatchmentDelineator | None = None,
         ensemble: CatchmentEnsemble | None = None,
+        exclusion_mask: np.ndarray | None = None,
     ) -> None:
         self.flow = flow
         self.dem = flow.dem
         self.config = config or settings.siting
         self.delineator = delineator or CatchmentDelineator(flow)
         self.ensemble = ensemble
+        self.exclusion_mask = _validated_exclusion(exclusion_mask, self.dem.shape)
         self._relative_elevation: np.ndarray | None = None
         self._height_above_trunk: np.ndarray | None = None
 
     @classmethod
     def from_ensemble(
-        cls, ensemble: CatchmentEnsemble, *, config: SitingConfig | None = None
+        cls,
+        ensemble: CatchmentEnsemble,
+        *,
+        config: SitingConfig | None = None,
+        exclusion_mask: np.ndarray | None = None,
     ) -> "PondSiteSelector":
         """Site on the ensemble's primary grid and cross-check on the others.
 
@@ -210,7 +237,13 @@ class PondSiteSelector:
         two delineations per site and nothing else.
         """
         primary = ensemble.primary
-        return cls(primary.flow, config=config, delineator=primary, ensemble=ensemble)
+        return cls(
+            primary.flow,
+            config=config,
+            delineator=primary,
+            ensemble=ensemble,
+            exclusion_mask=exclusion_mask,
+        )
 
     # ------------------------------------------------------------------ #
     # The masks
@@ -346,9 +379,26 @@ class PondSiteSelector:
             self.height_above_trunk_grid >= self.config.min_height_above_trunk_m
         )
 
+    def available_mask(self) -> np.ndarray:
+        """Ground not ruled out by something the terrain cannot see.
+
+        Terrain says where water collects. It cannot say whether that spot is a house, a
+        road, or a field somebody owns, and no amount of contour data will tell it. This
+        is where that answer arrives from outside: Phase 3's land-availability service
+        hands in a grid of ground to leave alone, and the pond is sited around it.
+
+        All ground when nothing was handed in, so the rule costs nothing when unused.
+        """
+        if self.exclusion_mask is None:
+            return np.ones(self.dem.shape, dtype=bool)
+        return ~self.exclusion_mask
+
     def candidate_mask(self) -> np.ndarray:
         return (
-            self.stream_mask() & self.buildable_mask() & self.clear_of_watercourse_mask()
+            self.stream_mask()
+            & self.buildable_mask()
+            & self.clear_of_watercourse_mask()
+            & self.available_mask()
         )
 
     # ------------------------------------------------------------------ #
@@ -408,26 +458,29 @@ class PondSiteSelector:
         stream = self.stream_mask()
         buildable = self.buildable_mask()
         clear = self.clear_of_watercourse_mask()
-        candidates = stream & buildable & clear
+        available = self.available_mask()
+        candidates = stream & buildable & clear & available
         if not candidates.any():
-            raise SitingError(*self._no_candidates_reason(stream, buildable, clear))
+            raise SitingError(
+                *self._no_candidates_reason(stream, buildable, clear, available)
+            )
 
-        available = candidates.copy()
+        unclaimed = candidates.copy()
         ranked = self._ranked_candidates(candidates)
 
         nx = self.dem.shape[1]
         # A view, not a copy: the in-place suppression below is visible through it.
-        flat_available = available.ravel()
+        flat_unclaimed = unclaimed.ravel()
         sites: list[PondSite] = []
         for cell in ranked:
-            if not flat_available[cell]:
+            if not flat_unclaimed[cell]:
                 continue
             row, col = divmod(int(cell), nx)
             catchment = self.delineator.delineate_cell(row, col)
             sites.append(self._build_site(len(sites) + 1, row, col, catchment))
             # Step 4: this pick's whole catchment leaves the pool, so the next site is a
             # different basin rather than a different point on the same stream.
-            available &= ~self._suppression_mask(row, col, catchment)
+            unclaimed &= ~self._suppression_mask(row, col, catchment)
             if len(sites) == wanted:
                 break
 
@@ -532,9 +585,27 @@ class PondSiteSelector:
         )
 
     def _no_candidates_reason(
-        self, stream: np.ndarray, buildable_mask: np.ndarray, clear_mask: np.ndarray
+        self,
+        stream: np.ndarray,
+        buildable_mask: np.ndarray,
+        clear_mask: np.ndarray,
+        available_mask: np.ndarray | None = None,
     ) -> tuple[str, str, str]:
         """Say which rule emptied the pool. That is the useful half of the error."""
+        terrain_allows = stream & buildable_mask & clear_mask
+        # Checked before the terrain rules below: when an exclusion mask is what emptied
+        # the pool the terrain is blameless, and only the caller can act on it.
+        if (
+            available_mask is not None
+            and terrain_allows.any()
+            and not (terrain_allows & available_mask).any()
+        ):
+            return (
+                "no_available_ground",
+                "Every site the terrain allows was excluded as unavailable ground.",
+                "The exclusion mask covers all of this sheet's buildable channels. "
+                "Check that it was meant to be this large.",
+            )
         streams = int(stream.sum())
         buildable = int(buildable_mask.sum())
         threshold_ha = self.stream_threshold_m2 / 1e4
@@ -581,10 +652,16 @@ def select_pond_sites(
     top_n: int | None = None,
     ensemble: CatchmentEnsemble | None = None,
     config: SitingConfig | None = None,
+    exclusion_mask: np.ndarray | None = None,
 ) -> SitingResult:
-    """Convenience wrapper: site on `flow`, optionally cross-checked by `ensemble`."""
+    """Convenience wrapper: site on `flow`, optionally cross-checked by `ensemble`.
+
+    `exclusion_mask` is ground to leave alone — see `PondSiteSelector.available_mask`.
+    """
     if ensemble is not None:
-        selector = PondSiteSelector.from_ensemble(ensemble, config=config)
+        selector = PondSiteSelector.from_ensemble(
+            ensemble, config=config, exclusion_mask=exclusion_mask
+        )
     else:
-        selector = PondSiteSelector(flow, config=config)
+        selector = PondSiteSelector(flow, config=config, exclusion_mask=exclusion_mask)
     return selector.select(top_n)

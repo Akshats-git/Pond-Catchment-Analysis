@@ -115,6 +115,77 @@ def test_no_site_sits_inside_the_edge_buffer():
         assert distance[site.catchment.outlet_rc] >= settings.siting.edge_buffer_m
 
 
+# --------------------------------------------------------------------------- #
+# Ground the terrain cannot rule out
+#
+# Contours say where water collects, never whether that spot is a house or a field
+# somebody owns. `exclusion_mask` is where that answer arrives from outside, and these
+# tests pin it on the valley whose right answer is derivable: the channel is one column,
+# so what excluding part of it should do is knowable cell by cell.
+# --------------------------------------------------------------------------- #
+def test_no_exclusion_mask_changes_nothing():
+    """The seam has to be free when unused, or it is a cost paid by every caller."""
+    dem = valley()
+    plain = selector_for(dem).select(1).sites[0]
+    passed_none = PondSiteSelector(analyse_terrain(dem), exclusion_mask=None)
+
+    assert passed_none.select(1).sites[0].catchment.outlet_rc == plain.catchment.outlet_rc
+    assert passed_none.available_mask().all()
+
+
+def test_excluded_ground_is_not_sited_on():
+    """Rule out the cell the selector would otherwise pick and it picks another. The
+    catchment is still delineated on the real terrain: only the choice of outlet moves."""
+    dem = valley()
+    chosen = selector_for(dem).select(1).sites[0].catchment.outlet_rc
+
+    mask = np.zeros(dem.shape, dtype=bool)
+    mask[chosen] = True
+    site = PondSiteSelector(analyse_terrain(dem), exclusion_mask=mask).select(1).sites[0]
+
+    assert site.catchment.outlet_rc != chosen
+    assert not mask[site.catchment.outlet_rc]
+
+
+def test_excluding_the_whole_channel_says_which_rule_emptied_the_pool():
+    """The failure has to name the exclusion rather than blame the terrain, because the
+    terrain is unchanged and only the caller can act on it."""
+    dem = valley()
+    selector = selector_for(dem)
+    mask = selector.candidate_mask().copy()
+
+    with pytest.raises(SitingError) as caught:
+        PondSiteSelector(analyse_terrain(dem), exclusion_mask=mask).select(1)
+
+    assert caught.value.code == "no_available_ground"
+    assert caught.value.hint
+
+
+def test_a_mask_of_the_wrong_shape_is_refused_with_both_shapes():
+    """A caller bug numpy would otherwise broadcast into a quietly wrong site."""
+    dem = valley()
+    with pytest.raises(SitingError) as caught:
+        PondSiteSelector(analyse_terrain(dem), exclusion_mask=np.zeros((3, 3), bool))
+
+    assert caught.value.code == "exclusion_mask_shape"
+    assert "(3, 3)" in caught.value.detail and str(dem.shape) in caught.value.detail
+
+
+def test_the_convenience_wrapper_carries_the_mask_through():
+    """`select_pond_sites` is the entry point the pipeline uses, so the seam is only
+    real if it survives that hop."""
+    dem = valley()
+    flow = analyse_terrain(dem)
+    chosen = select_pond_sites(flow, top_n=1).sites[0].catchment.outlet_rc
+
+    mask = np.zeros(dem.shape, dtype=bool)
+    mask[chosen] = True
+
+    assert select_pond_sites(flow, top_n=1, exclusion_mask=mask).sites[
+        0
+    ].catchment.outlet_rc != chosen
+
+
 def test_two_valleys_give_two_independent_basins():
     """The point of suppression: alternatives are different basins, not different points
     on one stream."""

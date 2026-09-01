@@ -7,7 +7,7 @@ into it, and how much water that ground delivers in an average year.
 [API documentation](http://10.1.75.53:5229/docs).
 
 ```bash
-curl -F file=@data/contours_1m.kml http://10.1.75.53:5229/api/v1/analyzeContour
+curl -F contour_map=@data/contours_1m.kml http://10.1.75.53:5229/api/v1/analyzeContour
 ```
 
 Phase 2 of the Village Pond Planning System. The Phase 1 high-level design is in
@@ -64,17 +64,20 @@ uvicorn app.main:app --reload
 
 Open `http://localhost:8000` for the demo page. Drop the sample map on it and the
 catchment is drawn over satellite imagery. Click any candidate to highlight the ground it
-covers and the water its pond would hold. Turn **Contours** on and the sheet's own lines are drawn underneath, which is how
-you check that a boundary follows the ridges rather than taking it on trust. Interactive
-API documentation is at `http://localhost:8000/docs`.
+covers and the water its pond would hold. Turn **Contours** on and the sheet's own lines
+are drawn underneath, which is how you check that a boundary follows the ridges rather
+than taking it on trust. Interactive API documentation is at
+`http://localhost:8000/docs`.
 
 ```bash
-curl -F file=@data/contours_1m.kml http://localhost:8000/api/v1/analyzeContour
+curl -F contour_map=@data/contours_1m.kml http://localhost:8000/api/v1/analyzeContour
 ```
 
 `POST /api/v1/analyzeContour`, also reachable as `findCatchment`, takes the contour file
-plus optional `grid_resolution`, `top_n`, `lat`, `lon`, `curve_number`, `rainfall_mm`,
-`rain_days`, `target_depth_m` and `ensemble`. It returns the recommended site, its
+in the **`contour_map`** field — `file` is accepted as well, for clients written before
+the field had a fixed name — plus optional `grid_resolution`, `top_n`, `lat`, `lon`,
+`curve_number`, `rainfall_mm`, `rain_days`, `target_depth_m` and `ensemble`. It returns
+the recommended site, its
 catchment with an error bar, the stage-storage curve, the yearly runoff, and a GeoJSON
 `FeatureCollection` that loads straight into geojson.io. Errors always come back as
 `{"status": "error", "code", "detail", "hint"}`.
@@ -147,7 +150,7 @@ POND_API_MAX_CONCURRENT_ANALYSES=1         # analyses that run at once; the rest
 pytest
 ```
 
-390 tests, about 119 seconds, all passing. No test needs the network:
+428 tests, about 127 seconds, all passing. No test needs the network:
 `tests/conftest.py` switches the live rainfall fetch off, and the Open-Meteo provider is
 exercised against a payload built in the test.
 

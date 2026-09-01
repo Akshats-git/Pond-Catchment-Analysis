@@ -23,13 +23,13 @@ that ground delivers in an average year.
 
 ### Request
 
-`multipart/form-data`. Only `file` is required; every other field has a derived or
-configured default, and the defaults are what the sample run in
+`multipart/form-data`. Only `contour_map` is required; every other field has a derived
+or configured default, and the defaults are what the sample run in
 [REPORT.md](../REPORT.md) used.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `file` | file | — | The contour map, `.kml` or `.kmz`. Contour **lines**, not point labels. Max 64 MB |
+| `contour_map` | file | — | The contour map, `.kml` or `.kmz`. Contour **lines**, not point labels. Max 64 MB |
 | `grid_resolution` | float | derived | Grid cell size in metres. Left out, it is the mean contour spacing ÷ 4, clamped to 2–20 m |
 | `top_n` | int | 3 | How many separate basins to return |
 | `lat` | float | — | Latitude of a pour point you have chosen yourself. Send with `lon` |
@@ -109,22 +109,22 @@ style them without guessing, and the alternates' ponds and markers come in a pal
 
 ```bash
 # Simplest possible call: the file, and nothing else.
-curl -F file=@data/contours_1m.kml \
+curl -F contour_map=@data/contours_1m.kml \
      http://10.1.75.53:5229/api/v1/analyzeContour
 
 # Your own rain gauge, a coarser grid, and five sites instead of three.
-curl -F file=@data/contours_1m.kml \
+curl -F contour_map=@data/contours_1m.kml \
      -F rainfall_mm=1200 -F rain_days=55 \
      -F grid_resolution=5 -F top_n=5 \
      http://10.1.75.53:5229/api/v1/analyzeContour
 
 # A pour point you have already chosen: no site search, just that catchment.
-curl -F file=@data/contours_1m.kml \
+curl -F contour_map=@data/contours_1m.kml \
      -F lat=21.243922 -F lon=81.289998 \
      http://10.1.75.53:5229/api/v1/analyzeContour
 
 # Just the headline numbers.
-curl -sF file=@data/contours_1m.kml \
+curl -sF contour_map=@data/contours_1m.kml \
      http://10.1.75.53:5229/api/v1/analyzeContour \
   | python3 -c 'import json,sys; s=json.load(sys.stdin)["recommended_site"]; \
 print(s["location"], s["catchment"]["area_ha"], "ha", s["runoff"]["annual_runoff_m3"], "m3/yr")'
@@ -151,7 +151,7 @@ file, `contour_count`, `bbox`, `interval_m` and `elevation_range_m` match
 
 | Field | Type | Required | Default | Notes |
 |---|---|---|---|---|
-| `file` | file | yes | — | `.kml` or `.kmz`, the same file `/analyzeContour` takes |
+| `contour_map` | file | yes | — | `.kml` or `.kmz`, the same file `/analyzeContour` takes |
 | `simplify_m` | float | no | `1.5` | How far a drawn line may depart from the one in the file. `0` sends every vertex. 0 to 1000 |
 
 The default is three quarters of the finest grid the service will ever build, so the
@@ -213,15 +213,15 @@ service thins further, reports the tolerance it settled on, and says so in `warn
 
 ```bash
 # The overlay, at the default thinning.
-curl -X POST -F "file=@data/contours_1m.kml" \
+curl -X POST -F "contour_map=@data/contours_1m.kml" \
      http://10.1.75.53:5229/api/v1/contours -o contours.geojson
 
 # Every vertex in the file, nothing dropped.
-curl -X POST -F "file=@data/contours_1m.kml" -F "simplify_m=0" \
+curl -X POST -F "contour_map=@data/contours_1m.kml" -F "simplify_m=0" \
      http://10.1.75.53:5229/api/v1/contours
 
 # Just the shape of the answer.
-curl -s -X POST -F "file=@data/contours_1m.kml" \
+curl -s -X POST -F "contour_map=@data/contours_1m.kml" \
      http://10.1.75.53:5229/api/v1/contours \
   | python3 -c 'import json,sys; b=json.load(sys.stdin); \
 print(b["contour_count"], "lines,", b["level_count"], "levels,", b["vertex_count"], "points")'
@@ -309,7 +309,8 @@ file has to change.
 
 | Code | Cause |
 |---|---|
-| `invalid_request` | A field missing or of the wrong type (FastAPI validation) |
+| `missing_file` | No contour map in the request. It goes in the `contour_map` field |
+| `invalid_request` | A field of the wrong type (FastAPI validation) |
 | `invalid_resolution` | `grid_resolution` outside the 2–20 m band |
 | `curve_number_out_of_range` | `curve_number` outside 30–98 |
 | `bad_target_depth` | `target_depth_m` not positive |
@@ -321,6 +322,8 @@ file has to change.
 | `no_buildable_ground` | Nothing on the sheet is flat enough to build on |
 | `no_ground_clear_of_watercourse` | Every candidate stands in or too near a watercourse |
 | `no_site_found` | The search finished with nothing that satisfies every rule |
+| `no_available_ground` | An `exclusion_mask` ruled out every site the terrain allows. Library callers only; see [REPORT.md §8](../REPORT.md) |
+| `exclusion_mask_shape` | An `exclusion_mask` was not built on the analysis grid. Library callers only |
 | `ensemble_unavailable` | `ensemble=true` on a host without the memory for it (this deployment) |
 
 The last few are not malformed requests, but to a client they are the same thing: nothing

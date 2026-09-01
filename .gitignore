@@ -26,3 +26,7 @@ pytest.log
 .DS_Store
 
 references/
+
+# Working notes, kept local
+PLAN.md
+REPORT.md

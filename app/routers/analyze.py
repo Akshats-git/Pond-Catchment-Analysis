@@ -67,17 +67,17 @@ from app.schemas.responses import (
     rainfall_response,
 )
 
-__all__ = ["router"]
+__all__ = ["UPLOAD_FIELD", "UPLOAD_FIELD_ALIAS", "router"]
 
 router = APIRouter(tags=["analysis"])
 
 _ACCEPTED_SUFFIXES = (".kml", ".kmz")
 
-_UPLOAD_FIELD = "contour_map"
+UPLOAD_FIELD = "contour_map"
 """The multipart field the contour map is expected under. Fixed by the assignment
 brief, so it is what `/docs`, the README and every curl example use."""
 
-_UPLOAD_FIELD_ALIAS = "file"
+UPLOAD_FIELD_ALIAS = "file"
 """Also accepted, and kept out of the schema so `/docs` offers one file picker rather
 than two. It is what this service asked for before the brief named a field, and what
 the demo page sent, so dropping it would break a client to gain nothing."""
@@ -97,9 +97,9 @@ def _resolve_upload(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "missing_file",
             f"No contour map was uploaded. Attach the .kml or .kmz file as the "
-            f"`{_UPLOAD_FIELD}` field.",
-            f"With curl: -F {_UPLOAD_FIELD}=@contours.kml. In Postman: Body, form-data, "
-            f"a row of type File named {_UPLOAD_FIELD}. The field `{_UPLOAD_FIELD_ALIAS}` "
+            f"`{UPLOAD_FIELD}` field.",
+            f"With curl: -F {UPLOAD_FIELD}=@contours.kml. In Postman: Body, form-data, "
+            f"a row of type File named {UPLOAD_FIELD}. The field `{UPLOAD_FIELD_ALIAS}` "
             f"is accepted too.",
         )
     return upload
@@ -142,6 +142,8 @@ _STATUS_BY_CODE: dict[str, int] = {
     "no_stream_network": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "no_buildable_ground": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "no_ground_clear_of_watercourse": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "no_available_ground": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "exclusion_mask_shape": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "no_site_found": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "ensemble_unavailable": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "invalid_simplify": status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -197,7 +199,7 @@ async def _read_upload(file: UploadFile) -> bytes:
             status.HTTP_400_BAD_REQUEST,
             "empty_upload",
             "The uploaded file is empty.",
-            f"Attach a .kml or .kmz contour sheet as the `{_UPLOAD_FIELD}` field.",
+            f"Attach a .kml or .kmz contour sheet as the `{UPLOAD_FIELD}` field.",
         )
     return b"".join(chunks)
 

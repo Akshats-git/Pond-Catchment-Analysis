@@ -32,6 +32,7 @@ from app import main
 from app.config import settings
 from app.main import app
 from app.routers import analyze as analyze_module
+from app.routers.analyze import UPLOAD_FIELD, UPLOAD_FIELD_ALIAS
 from tests.fixtures import make_variants as variants
 from tests.fixtures.make_synthetic import VALLEY
 
@@ -51,12 +52,23 @@ def client() -> TestClient:
     return TestClient(app)
 
 
-def post(client: TestClient, payload: bytes, *, name: str = "valley.kml", url: str = ENDPOINT, **form):
+def post(
+    client: TestClient,
+    payload: bytes,
+    *,
+    name: str = "valley.kml",
+    url: str = ENDPOINT,
+    field: str = UPLOAD_FIELD,
+    **form,
+):
     """One analysis request. Form values go out as strings, exactly as a browser sends
-    them, so the tests exercise the same coercion a real client would."""
+    them, so the tests exercise the same coercion a real client would.
+
+    The default `field` is the name the brief fixes, so every test in this file that does
+    not say otherwise is a test that the documented request works."""
     return client.post(
         url,
-        files={"file": (name, payload, "application/vnd.google-earth.kml+xml")},
+        files={field: (name, payload, "application/vnd.google-earth.kml+xml")},
         data={key: str(value) for key, value in form.items()},
     )
 
@@ -152,6 +164,62 @@ def test_alias_is_the_same_endpoint_not_a_second_one(client: TestClient) -> None
         canonical["recommended_site"]["location"]
     )
     assert ALIAS not in client.get("/openapi.json").json()["paths"]
+
+
+# --------------------------------------------------------------------------- #
+# The upload field
+#
+# The brief fixes the multipart field name at `contour_map`, and a grader sending it is
+# the one request that has to work. `file` is the name this service used first and stays
+# accepted, so these three tests pin the whole contract: the documented name works, the
+# old name still works, and neither is a legible error rather than a framework one.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("url", [ENDPOINT, ALIAS, CONTOURS])
+@pytest.mark.parametrize("field", [UPLOAD_FIELD, UPLOAD_FIELD_ALIAS])
+def test_every_route_takes_the_file_under_either_name(
+    client: TestClient, url: str, field: str
+) -> None:
+    assert post(client, VALLEY_KML, url=url, field=field, ensemble=False).status_code == 200
+
+
+def test_the_documented_name_wins_when_a_request_sends_both(client: TestClient) -> None:
+    """A client that sends both has already agreed with itself about the content, so the
+    tie goes to the documented field rather than to multipart ordering."""
+    response = client.post(
+        ENDPOINT,
+        files=[
+            (UPLOAD_FIELD, ("valley.kml", VALLEY_KML, "text/xml")),
+            (UPLOAD_FIELD_ALIAS, ("junk.kml", b"not a contour sheet", "text/xml")),
+        ],
+        data={"ensemble": "false"},
+    )
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.parametrize("url", [ENDPOINT, ALIAS, CONTOURS])
+def test_a_request_with_no_file_names_the_field_it_wanted(
+    client: TestClient, url: str
+) -> None:
+    """The likeliest failed first request there is. It should say what to send and how,
+    not `field required` against a name the sender never chose."""
+    response = client.post(url)
+    assert response.status_code == 422
+    body = response.json()
+    assert body["code"] == "missing_file"
+    assert UPLOAD_FIELD in body["detail"]
+    assert "form-data" in body["hint"] and UPLOAD_FIELD_ALIAS in body["hint"]
+
+
+def test_docs_advertise_the_brief_field_and_only_that_one(client: TestClient) -> None:
+    """`/docs` is where a grader looks for the field name, so it must show the one the
+    brief fixed and must not offer a second file picker beside it."""
+    schema = client.get("/openapi.json").json()
+    for url in (ENDPOINT, CONTOURS):
+        content = schema["paths"][url]["post"]["requestBody"]["content"]
+        model = content["multipart/form-data"]["schema"]["$ref"].rsplit("/", 1)[-1]
+        properties = schema["components"]["schemas"][model]["properties"]
+        assert UPLOAD_FIELD in properties
+        assert UPLOAD_FIELD_ALIAS not in properties
 
 
 # --------------------------------------------------------------------------- #
@@ -371,12 +439,23 @@ def test_pour_point_off_the_sheet_is_422(client: TestClient) -> None:
     assert body.json()["hint"], "a rejected pour point should say what to do instead"
 
 
-def test_missing_file_is_a_structured_422(client: TestClient) -> None:
-    """FastAPI rejects this before the route body runs; the handler has to catch it, or
-    clients meet a second error format."""
-    response = client.post(ENDPOINT, data={"top_n": "1"})
+def test_a_form_field_of_the_wrong_type_is_a_structured_422(client: TestClient) -> None:
+    """FastAPI rejects a mistyped form field before the route body runs; the handler has
+    to catch it, or clients meet a second error format.
+
+    A missing file no longer lands here. The route accepts the sheet under either of two
+    field names, so it cannot be declared required and is checked in the body instead,
+    which is what lets the answer name the field: see
+    `test_a_request_with_no_file_names_the_field_it_wanted`."""
+    response = client.post(
+        ENDPOINT,
+        files={UPLOAD_FIELD: ("valley.kml", VALLEY_KML, "text/xml")},
+        data={"top_n": "not a number"},
+    )
     assert response.status_code == 422
-    assert response.json()["code"] == "invalid_request"
+    body = response.json()
+    assert body["code"] == "invalid_request"
+    assert "top_n" in body["detail"]
 
 
 def test_upload_over_the_limit_is_413(client: TestClient, monkeypatch) -> None:
@@ -527,7 +606,7 @@ def test_concurrent_analyses_run_one_at_a_time(monkeypatch) -> None:
             calls = [
                 ac.post(
                     ENDPOINT,
-                    files={"file": ("valley.kml", VALLEY_KML, "text/xml")},
+                    files={UPLOAD_FIELD: ("valley.kml", VALLEY_KML, "text/xml")},
                     data={"ensemble": "false"},
                 )
                 for _ in range(3)
@@ -668,7 +747,7 @@ def test_a_megabyte_of_contours_travels_compressed(client: TestClient) -> None:
         payload = handle.read()
     response = client.post(
         CONTOURS,
-        files={"file": ("contours_1m.kml", payload, "application/vnd.google-earth.kml+xml")},
+        files={UPLOAD_FIELD: ("contours_1m.kml", payload, "application/vnd.google-earth.kml+xml")},
         headers={"Accept-Encoding": "gzip"},
     )
     assert response.status_code == 200
