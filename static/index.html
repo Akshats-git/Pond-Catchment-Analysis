@@ -1050,10 +1050,11 @@ function tip(node, text) {
 function drawOrder(list) {
   const weight = (f) => {
     const role = f.properties.role;
-    if (role === "catchment") return f.properties.rank === selectedRank ? 1 : 0;
-    if (role === "pond") return 2;
-    if (role === "flow_path") return 3;
-    return 4;
+    const selected = f.properties.rank === selectedRank;
+    if (role === "catchment") return selected ? 1 : 0;
+    if (role === "pond") return selected ? 3 : 2;
+    if (role === "flow_path") return 4;
+    return 5;
   };
   return list.map((f, i) => [f, i]).sort((a, b) => weight(a[0]) - weight(b[0]) || a[1] - b[1])
              .map(([f]) => f);
@@ -1082,6 +1083,7 @@ function renderOverlay() {
 
     if (type === "Polygon" || type === "MultiPolygon") {
       const catchment = props.role === "catchment";
+      const pond = props.role === "pond";
       const d = polygonPath(geometry);
       const width = catchment ? (selected ? 3.5 : hovered ? 2.5 : 1.8) : 1.5;
 
@@ -1102,16 +1104,19 @@ function renderOverlay() {
         d: d,
         "fill-rule": "evenodd",
         fill: props.fill || "#a6cee3",
+        // Every site's pond is drawn, so the one being read has to be the loud one: the
+        // others stay visible enough to say "a pond would go here" and no louder.
         "fill-opacity": catchment
           ? (selected ? 0.42 : hovered ? 0.3 : 0.16) * wash
-          : (props["fill-opacity"] ?? 0.55),
+          : (props["fill-opacity"] ?? 0.55) * (!pond || selected || hovered ? 1 : 0.6),
         stroke: catchment && !selected && !hovered ? "#cfe6f5" : (props.stroke || "#1f78b4"),
         "stroke-width": width,
+        "stroke-opacity": pond && !selected && !hovered ? 0.65 : null,
         "stroke-dasharray": catchment && !selected && !hovered ? "7 5" : null,
         "stroke-linejoin": "round",
-        class: catchment ? "hit" : null,
+        class: catchment || pond ? "hit" : null,
       });
-      if (catchment) attachSelection(node, props.rank);
+      if (catchment || pond) attachSelection(node, props.rank);
       overlayEl.appendChild(tip(node, describe(props)));
       if (catchment && selected) selectedLabel = { props, geometry };
     } else if (type === "LineString" || type === "MultiLineString") {
@@ -1698,7 +1703,8 @@ function buildLegend() {
   if (features.length) {
     row("The catchment you picked", "#a6cee3", "sw", "solid #1f78b4");
     row("The other catchments", "#a6cee3", "sw faint", "dashed #4b6b80");
-    row("Water in the pond", "#3182bd", "sw", "solid #08519c");
+    row("Water in the pond you picked", "#3182bd", "sw", "solid #08519c");
+    row("Water in the other ponds", "#9ecae1", "sw faint", "solid #3182bd");
     row("Longest path water takes", null, "sw line", null);
     row("Pond site", "#08519c", "sw dot", null);
   }

@@ -93,16 +93,17 @@ The full field list is in `/docs`. The shape:
   },
   "alternative_sites": [ /* same shape, ranks 2..top_n, each a separate basin */ ],
   "search":  { "stream_threshold_ha": 4.2, "candidate_cells": 566, ... },
-  "geojson": { "type": "FeatureCollection", "features": [ /* 8 features */ ] },
+  "geojson": { "type": "FeatureCollection", "features": [ /* 10 for three sites */ ] },
   "warnings": [ "..." ],                  // never fatal; always worth showing the user
   "timing_ms": { "parse": 221.7, "dem": 1677.8, "flow": 894.8, "total": 10122.9 }
 }
 ```
 
-The `geojson` block is a complete `FeatureCollection` — catchment polygons, pond
-footprints, outlets and the longest flow path — that pastes straight into
-[geojson.io](https://geojson.io). Each feature carries `role` and `rank` properties so a
-client can style them without guessing.
+The `geojson` block is a complete `FeatureCollection` that pastes straight into
+[geojson.io](https://geojson.io). Every site contributes a catchment polygon, the pond
+footprint at capacity and an outlet point; the longest flow path is drawn for the
+recommended site alone. Each feature carries `role` and `rank` properties so a client can
+style them without guessing, and the alternates' ponds and markers come in a paler blue.
 
 ### curl
 

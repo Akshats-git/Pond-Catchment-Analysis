@@ -370,13 +370,26 @@ def test_a_pond_of_one_cell_is_not_drawn(sites, balances, dem):
     assert pond_feature(storage, dem) is None
 
 
-def test_alternates_get_a_catchment_and_a_point_but_no_flow_path(sites, flow, balances):
+def test_alternates_get_a_pond_and_a_point_but_no_flow_path(sites, flow, balances):
+    """The flow path is the costed site's alone; the pond is every site's, because the
+    question asked of an alternate is where its water would sit."""
     detailed = site_features(flow, sites[0], balances[0], detailed=True)
     outline = site_features(flow, sites[1], balances[1], detailed=False)
 
-    assert [f["properties"]["role"] for f in outline] == ["catchment", "pond_site"]
+    assert [f["properties"]["role"] for f in outline] == [
+        "catchment", "pond", "pond_site"
+    ]
     assert "flow_path" in [f["properties"]["role"] for f in detailed]
     assert "pond" in [f["properties"]["role"] for f in detailed]
+
+
+def test_an_alternates_pond_is_drawn_paler_than_the_recommended_one(dem, balances):
+    """simplestyle is all geojson.io has to separate the pick from the offers."""
+    chosen = pond_feature(balances[0].storage, dem, rank=1)["properties"]
+    other = pond_feature(balances[1].storage, dem, rank=2)["properties"]
+
+    assert chosen["fill"] != other["fill"]
+    assert other["fill-opacity"] < chosen["fill-opacity"]
 
 
 def test_the_collection_draws_areas_first_and_points_last(collection):
@@ -390,6 +403,7 @@ def test_the_collection_covers_every_site_and_bounds_them(collection, sites):
     roles = [f["properties"]["role"] for f in collection["features"]]
     assert roles.count("catchment") == len(sites)
     assert roles.count("pond_site") == len(sites)
+    assert roles.count("pond") == len(sites)
     assert roles.count("flow_path") == 1
 
     min_lon, min_lat, max_lon, max_lat = collection["bbox"]

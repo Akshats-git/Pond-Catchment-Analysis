@@ -25,6 +25,12 @@ held in places, and blocking the event loop would stall every other request incl
 mid-array, so the thread finishes on its own. The timeout is a promise to the caller,
 not a kill switch, and it is documented as such rather than overstated.
 
+**The file arrives as `contour_map`.** That is the field name the assignment brief
+fixes, so it is the one `/docs` shows and the one every example sends. `file` is still
+accepted, unnamed in the schema, because the demo page and this project's own history
+used it and a working client should not break on a rename. `_resolve_upload` takes
+whichever came, and a request carrying neither is a 422 that names both.
+
 **`/contours` is the exception to the semaphore.** It holds a parsed file and nothing
 else — no grid, no flow field — so it is not what the concurrency limit is protecting
 against, and gating it would defeat the point: the demo page asks for it *while* an
@@ -66,6 +72,38 @@ __all__ = ["router"]
 router = APIRouter(tags=["analysis"])
 
 _ACCEPTED_SUFFIXES = (".kml", ".kmz")
+
+_UPLOAD_FIELD = "contour_map"
+"""The multipart field the contour map is expected under. Fixed by the assignment
+brief, so it is what `/docs`, the README and every curl example use."""
+
+_UPLOAD_FIELD_ALIAS = "file"
+"""Also accepted, and kept out of the schema so `/docs` offers one file picker rather
+than two. It is what this service asked for before the brief named a field, and what
+the demo page sent, so dropping it would break a client to gain nothing."""
+
+
+def _resolve_upload(
+    contour_map: UploadFile | None, file: UploadFile | None
+) -> UploadFile:
+    """The uploaded sheet, under whichever of the two accepted field names it came.
+
+    `contour_map` wins when a request sends both, because it is the documented name and
+    a client sending both has already agreed with itself about the content.
+    """
+    upload = contour_map if contour_map is not None else file
+    if upload is None:
+        raise APIError(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "missing_file",
+            f"No contour map was uploaded. Attach the .kml or .kmz file as the "
+            f"`{_UPLOAD_FIELD}` field.",
+            f"With curl: -F {_UPLOAD_FIELD}=@contours.kml. In Postman: Body, form-data, "
+            f"a row of type File named {_UPLOAD_FIELD}. The field `{_UPLOAD_FIELD_ALIAS}` "
+            f"is accepted too.",
+        )
+    return upload
+
 
 _LIMITERS: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 """One analysis semaphore per event loop, created on first use.
@@ -159,7 +197,7 @@ async def _read_upload(file: UploadFile) -> bytes:
             status.HTTP_400_BAD_REQUEST,
             "empty_upload",
             "The uploaded file is empty.",
-            "Attach a .kml or .kmz contour sheet as the `file` field.",
+            f"Attach a .kml or .kmz contour sheet as the `{_UPLOAD_FIELD}` field.",
         )
     return b"".join(chunks)
 
@@ -207,9 +245,10 @@ def _extension_warning(filename: str) -> str | None:
     summary="Analyse a contour map and recommend a pond site with its catchment",
 )
 async def analyze_contour(
-    file: UploadFile = File(
-        ..., description="Contour map as .kml or .kmz. Contour lines, not point labels."
+    contour_map: UploadFile | None = File(
+        None, description="Contour map as .kml or .kmz. Contour lines, not point labels."
     ),
+    file: UploadFile | None = File(None, include_in_schema=False),
     grid_resolution: float | None = Form(
         None, description="Grid cell size in metres. Leave it out and the contour spacing\n        sets it."
     ),
@@ -247,6 +286,7 @@ async def analyze_contour(
 
     Send `lat` and `lon` together to analyse a spot you have already chosen instead.
     """
+    upload = _resolve_upload(contour_map, file)
     params = _params(
         {
             "grid_resolution": grid_resolution,
@@ -273,8 +313,8 @@ async def analyze_contour(
             "confidence reads `unassessed`.",
         )
 
-    filename = file.filename or "upload.kml"
-    data = await _read_upload(file)
+    filename = upload.filename or "upload.kml"
+    data = await _read_upload(upload)
 
     try:
         # The queue wait sits inside the timeout on purpose: a client is promised an
@@ -321,9 +361,10 @@ _CONTOUR_RESPONSES: dict[int | str, dict] = {
     summary="Draw the uploaded contour sheet, without analysing it",
 )
 async def contours(
-    file: UploadFile = File(
-        ..., description="Contour map as .kml or .kmz. The same file /analyzeContour takes."
+    contour_map: UploadFile | None = File(
+        None, description="Contour map as .kml or .kmz. The same file /analyzeContour takes."
     ),
+    file: UploadFile | None = File(None, include_in_schema=False),
     simplify_m: float | None = Form(
         None,
         description="How far a drawn line may depart from the one in the file, in "
@@ -357,8 +398,9 @@ async def contours(
             "Leave it out to get the default, which is finer than the analysis grid.",
         )
 
-    filename = file.filename or "upload.kml"
-    data = await _read_upload(file)
+    upload = _resolve_upload(contour_map, file)
+    filename = upload.filename or "upload.kml"
+    data = await _read_upload(upload)
     watch = Stopwatch()
 
     def work():
@@ -426,7 +468,8 @@ async def rainfall(
     include_in_schema=False,
 )
 async def find_catchment(
-    file: UploadFile = File(...),
+    contour_map: UploadFile | None = File(None),
+    file: UploadFile | None = File(None, include_in_schema=False),
     grid_resolution: float | None = Form(None),
     top_n: int | None = Form(None),
     lat: float | None = Form(None),
@@ -441,6 +484,7 @@ async def find_catchment(
     code behind both. Hidden from the schema so `/docs` shows one endpoint and not two
     identical ones."""
     return await analyze_contour(
+        contour_map=contour_map,
         file=file,
         grid_resolution=grid_resolution,
         top_n=top_n,

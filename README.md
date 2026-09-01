@@ -64,7 +64,7 @@ uvicorn app.main:app --reload
 
 Open `http://localhost:8000` for the demo page. Drop the sample map on it and the
 catchment is drawn over satellite imagery. Click any candidate to highlight the ground it
-covers. Turn **Contours** on and the sheet's own lines are drawn underneath, which is how
+covers and the water its pond would hold. Turn **Contours** on and the sheet's own lines are drawn underneath, which is how
 you check that a boundary follows the ridges rather than taking it on trust. Interactive
 API documentation is at `http://localhost:8000/docs`.
 

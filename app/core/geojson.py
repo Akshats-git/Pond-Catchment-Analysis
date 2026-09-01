@@ -427,11 +427,15 @@ def pond_feature(
 ) -> dict | None:
     """The water surface of the pond, at the stage the site can hold.
 
+    Drawn for every site, not just the chosen one: a candidate catchment without its
+    water body shows the ground but not the thing being built on it.
+
     None when the pond is a single cell: a 25 m^2 square drawn on a satellite image says
     less than nothing, and the storage numbers carry the fact anyway.
     """
     if storage.pond_mask.sum() < 2:
         return None
+    primary = rank == 1
     geometry, _ = mask_geometry(storage.pond_mask, dem, config=config)
     return _feature(
         geometry,
@@ -446,9 +450,11 @@ def pond_feature(
                 else storage.max_depth_m,
                 2,
             ),
-            "stroke": "#08519c",
-            "fill": "#3182bd",
-            "fill-opacity": 0.6,
+            # Paler for the alternates, the same way their markers are, so one glance
+            # separates the pond that was recommended from the ponds that were offered.
+            "stroke": "#08519c" if primary else "#3182bd",
+            "fill": "#3182bd" if primary else "#9ecae1",
+            "fill-opacity": 0.6 if primary else 0.45,
         },
     )
 
@@ -519,17 +525,19 @@ def site_features(
 ) -> list[dict]:
     """Everything drawable about one site.
 
-    `detailed` is off for the alternates: their catchment and their outlet are what a map
-    needs, and five flow paths over one sheet is noise rather than information.
+    `detailed` is off for the alternates: the longest flow path belongs to the site being
+    costed, and five flow paths over one sheet is noise rather than information. The
+    catchment, the pond and the outlet are drawn for every site, because the question a
+    reader asks of an alternate is where its pond would sit.
     """
     dem = flow.dem
     features = [catchment_feature(site, dem, config=config)]
     if detailed:
         features.append(flow_path_feature(flow, site, dem))
-        if balance is not None:
-            pond = pond_feature(balance.storage, dem, rank=site.rank, config=config)
-            if pond is not None:
-                features.append(pond)
+    if balance is not None:
+        pond = pond_feature(balance.storage, dem, rank=site.rank, config=config)
+        if pond is not None:
+            features.append(pond)
     features.append(outlet_feature(site, balance))
     return features
 
@@ -711,7 +719,8 @@ def build_geojson(
     *,
     config: GeoJSONConfig | None = None,
 ) -> dict:
-    """The whole response geometry: the recommended site in full, alternates in outline.
+    """The whole response geometry: every site's catchment, pond and outlet, and the
+    longest flow path of the recommended one.
 
     Features come out in draw order, with catchments first, then lines, then the points
     that sit on top of them, because most renderers honour it. geojson.io does.
