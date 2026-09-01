@@ -51,8 +51,9 @@ key. Send a figure of your own and it is used instead. If the weather service ca
 reached, a documented regional climatology answers and the response says so, so an
 analysis is never blocked by the weather.
 
-`GET /api/v1/rainfall?lat=&lon=` exposes the same feed on its own, which is what the demo
-page calls to fill in the rainfall box.
+`GET /api/v1/rainfall?lat=&lon=` exposes the same feed on its own. The demo page calls it
+for the middle of the sheet as soon as a file is read, so the figure is on screen before
+anything is analysed.
 
 ## Quickstart
 
@@ -62,11 +63,14 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-Open `http://localhost:8000` for the demo page. Drop the sample map on it and the
-catchment is drawn over satellite imagery. Click any candidate to highlight the ground it
-covers and the water its pond would hold. Turn **Contours** on and the sheet's own lines
-are drawn underneath, which is how you check that a boundary follows the ridges rather
-than taking it on trust. Interactive API documentation is at
+Open `http://localhost:8000` for the demo page. Drop the sample map on it and its
+contour lines are drawn over satellite imagery straight away, which is how you check that
+a catchment boundary follows the ridges rather than taking it on trust. The page asks for
+three things: the file, the land cover, the pond depth. Rainfall, grid size and the pour
+point are worked out from the sheet unless **Advanced** overrides them. Press **Analyse**
+and the answer arrives on the map and under three tabs: the sites, the water they yield,
+and the numbers the run was built from. Click any candidate, on the map or in the list,
+to see the ground it covers. Interactive API documentation is at
 `http://localhost:8000/docs`.
 
 ```bash

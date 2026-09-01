@@ -141,7 +141,8 @@ where `/analyzeContour` takes several.
 It exists because a catchment boundary drawn on satellite imagery cannot be checked by
 eye. Imagery does not show where the ridges are, and a boundary is right when it runs
 along them. Ask for the contours, lay the catchment over them, and the answer can be read
-rather than taken on trust. The demo page's **Contours** toggle is this endpoint.
+rather than taken on trust. The demo page calls it on upload and draws the result under
+the analysis; its **Contours** button toggles that layer.
 
 Both endpoints run the same parser, so the lines drawn are the lines analysed: on one
 file, `contour_count`, `bbox`, `interval_m` and `elevation_range_m` match
@@ -233,8 +234,8 @@ print(b["contour_count"], "lines,", b["level_count"], "levels,", b["vertex_count
 
 Ten years of daily rainfall for one point, averaged to a year. The same feed
 `/analyzeContour` uses when no rainfall figure is given, exposed on its own so a client
-can show the number before committing to a 15-second analysis. The demo page calls it as
-soon as a pour point is dropped.
+can show the number before committing to a 15-second analysis. The demo page calls it for
+the middle of the sheet as soon as a file is read.
 
 | Query | Type | Required | Range |
 |---|---|---|---|

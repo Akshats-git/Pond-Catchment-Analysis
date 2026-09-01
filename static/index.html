@@ -5,22 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pond Catchment Analysis</title>
 <!--
-  The demo page.
+  The demo page. One file, no build step, no CDN, so it runs from a file:// URL and on a
+  container with nothing installed. The only network calls are to this service and to the
+  tile servers credited under the map.
 
-  One file, no build step, no CDN. The map is drawn here rather than pulled from a
-  library, so the page works from a file:// URL, behind a proxy that blocks unpkg, and on
-  a free-tier container with nothing installed. The only network calls it makes are to
-  this service and to the tile servers it credits at the bottom of the map.
+  The map is a plain slippy map: Web Mercator tiles moved by one CSS transform, and the
+  API's GeoJSON reprojected into an SVG overlay in screen coordinates each frame. Screen
+  space rather than a scaled group, because a scaled group scales stroke widths with it.
 
-  The renderer is a plain slippy map. Web Mercator tiles positioned by one CSS transform,
-  and the API's GeoJSON re-projected into an SVG overlay in screen coordinates on every
-  frame. Screen space rather than a scaled group, because a scaled group scales stroke
-  widths and marker radii with it, and a 400 ha catchment at zoom 18 would draw a 40 px
-  outline over the ground it is meant to show.
+  Feature colours come from the simplestyle properties the API emits, so this page and
+  geojson.io draw the same picture from one source, app/core/geojson.py.
 
-  Feature colours come from the simplestyle properties the API already emits (stroke,
-  fill, fill-opacity, marker-color), so this page and geojson.io draw the same picture and
-  there is one place, app/core/geojson.py, where that picture is decided.
+  Three inputs are asked for: the file, the land cover, the pond depth. Rainfall, grid
+  size and the pour point are worked out from the sheet unless the Advanced panel
+  overrides them.
 -->
 <style>
   :root {
@@ -49,10 +47,9 @@
     --bad: #b3261e;
     --bad-wash: #fdeceb;
 
-    --radius: 10px;
-    --radius-sm: 7px;
-    --shadow: 0 1px 2px rgba(13, 26, 36, .08), 0 4px 14px rgba(13, 26, 36, .07);
-    --panel-width: 420px;
+    --radius: 9px;
+    --radius-sm: 6px;
+    --shadow: 0 1px 2px rgba(13, 26, 36, .08), 0 6px 18px rgba(13, 26, 36, .10);
   }
 
   @media (prefers-color-scheme: dark) {
@@ -80,14 +77,15 @@
       --bad: #f28b83;
       --bad-wash: #351816;
 
-      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 4px 14px rgba(0, 0, 0, .35);
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 6px 18px rgba(0, 0, 0, .38);
     }
   }
 
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html, body { height: 100%; margin: 0; }
   body {
-    font: 14px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     color: var(--ink);
     background: var(--bg);
     display: flex;
@@ -96,41 +94,118 @@
     -webkit-font-smoothing: antialiased;
   }
   a { color: var(--accent-deep); }
+  h2, h3 { margin: 0; }
 
   /* ---------------- header ---------------- */
   header {
-    background: var(--head);
-    color: var(--head-ink);
-    padding: 0 18px;
-    height: 52px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex: none;
+    background: var(--head); color: var(--head-ink); padding: 0 16px; height: 46px;
+    display: flex; align-items: center; gap: 10px; flex: none;
   }
   header .mark {
-    width: 24px; height: 24px; border-radius: 6px; flex: none;
-    background: linear-gradient(150deg, #3d9ad4, #0b4f8a);
-    display: grid; place-items: center;
+    width: 22px; height: 22px; border-radius: 6px; flex: none;
+    background: linear-gradient(150deg, #3d9ad4, #0b4f8a); display: grid; place-items: center;
   }
-  header .mark svg { width: 15px; height: 15px; }
-  header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .005em; }
-  header .sub {
-    color: var(--head-muted); font-size: 12.5px; padding-left: 12px;
-    border-left: 1px solid rgba(255, 255, 255, .14);
-  }
+  header .mark svg { width: 14px; height: 14px; }
+  header h1 { font-size: 14.5px; margin: 0; font-weight: 600; }
   header .spacer { flex: 1; }
   header a { color: #a9d3ee; text-decoration: none; font-size: 12.5px; }
   header a:hover { text-decoration: underline; }
-  #health {
-    font-size: 12.5px; color: var(--head-muted);
-    display: flex; align-items: center; gap: 7px;
+  #health { font-size: 12.5px; color: var(--head-muted); display: flex; align-items: center; gap: 7px; }
+  #health .dot { width: 7px; height: 7px; border-radius: 50%; background: #64748b; flex: none; }
+  #health.up .dot { background: #4ade80; }
+  #health.down .dot { background: #f87171; }
+
+  /* ---------------- setup bar ---------------- */
+  #bar {
+    flex: none; position: relative; z-index: 20; display: flex; align-items: flex-end;
+    gap: 14px; flex-wrap: wrap; padding: 9px 14px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
   }
-  #health .dot {
-    width: 7px; height: 7px; border-radius: 50%; background: #64748b; flex: none;
+  #bar .spacer { flex: 1; min-width: 0; }
+  .ctl { display: flex; flex-direction: column; gap: 4px; }
+  .ctl > .lbl {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--muted); font-weight: 700;
   }
-  #health.up .dot { background: #4ade80; box-shadow: 0 0 0 3px rgba(74, 222, 128, .18); }
-  #health.down .dot { background: #f87171; box-shadow: 0 0 0 3px rgba(248, 113, 113, .18); }
+  input[type=number], input[type=text], select {
+    font: inherit; font-size: 13px; padding: 6px 8px; height: 32px;
+    border: 1px solid var(--line); border-radius: var(--radius-sm);
+    color: var(--ink); background: var(--panel); appearance: none;
+  }
+  select { cursor: pointer; padding-right: 26px;
+    background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+                      linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position: right 12px center, right 7px center;
+    background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
+  input:focus, select:focus, button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent);
+  }
+  .unit { position: relative; display: inline-flex; align-items: center; }
+  .unit input { padding-right: 26px; }
+  .unit i { position: absolute; right: 9px; font-style: normal; font-size: 12px; color: var(--muted); }
+
+  button.btn {
+    font: inherit; font-size: 13px; height: 32px; padding: 0 12px;
+    border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius-sm);
+    cursor: pointer; color: var(--ink-soft); display: inline-flex; align-items: center; gap: 7px;
+  }
+  button.btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-deep); }
+  button.btn.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  button.btn:disabled { opacity: .5; cursor: not-allowed; }
+  button.btn svg { width: 14px; height: 14px; }
+  button.primary {
+    font: inherit; font-size: 13.5px; font-weight: 600; height: 32px; padding: 0 18px;
+    border: 0; border-radius: var(--radius-sm); cursor: pointer;
+    color: var(--on-accent); background: var(--accent-deep);
+  }
+  button.primary:hover:not(:disabled) { background: var(--accent); }
+  button.primary:disabled { background: var(--muted); opacity: .45; cursor: not-allowed; }
+
+  #filechip {
+    display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 6px 0 11px;
+    border: 1px solid var(--accent); background: var(--accent-wash); color: var(--accent-deep);
+    border-radius: var(--radius-sm); font-size: 13px; max-width: 260px;
+  }
+  #filechip .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #filechip .size { color: var(--muted); font-size: 11.5px; flex: none; }
+  #filechip .x {
+    border: 0; background: none; cursor: pointer; color: inherit; font-size: 16px;
+    line-height: 1; padding: 2px 4px; opacity: .65;
+  }
+  #filechip .x:hover { opacity: 1; }
+
+  /* advanced popover */
+  .adv-wrap { position: relative; }
+  #adv {
+    position: absolute; top: calc(100% + 8px); left: 0; z-index: 30;
+    width: min(300px, calc(100vw - 28px));
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 14px;
+  }
+  #adv .f { margin-bottom: 13px; }
+  #adv .f:last-child { margin-bottom: 0; }
+  #adv label.k {
+    display: block; font-size: 12px; font-weight: 600; color: var(--ink-soft); margin-bottom: 5px;
+  }
+  #adv input[type=number] { width: 100%; }
+  #adv .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  #adv .sub { font-size: 11.5px; color: var(--muted); margin-top: 5px; }
+  #adv .check { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  #adv .check input { accent-color: var(--accent); margin: 0; }
+  #adv .check input:disabled + span { color: var(--muted); }
+  #adv hr { border: 0; border-top: 1px solid var(--line-soft); margin: 13px 0; }
+  #adv .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  #adv code {
+    font-size: 11.5px; color: var(--accent-deep); background: var(--accent-wash);
+    padding: 3px 7px; border-radius: 5px;
+  }
+
+  #derived { font-size: 12px; color: var(--muted); padding-bottom: 7px; }
+  #derived b { color: var(--ink-soft); font-weight: 600; }
+  #prog { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; overflow: hidden; display: none; }
+  #prog.on { display: block; }
+  #prog i { display: block; height: 100%; width: 30%; background: var(--accent); animation: slide 1.3s ease-in-out infinite; }
+  @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(430%); } }
 
   /* ---------------- layout ---------------- */
   main { flex: 1; display: flex; min-height: 0; }
@@ -143,36 +218,28 @@
   #tiles { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
   #tiles img {
     position: absolute;
-    /* One pixel wider than the tile it holds. Fractional zoom scales the whole layer, and
-       at a scale of 1.4 the boundary between two exactly-adjacent tiles lands on a half
-       pixel and shows as a seam. Each tile still starts at its exact 256-multiple origin,
-       so the extra pixel overlaps its neighbour rather than shifting the map. */
+    /* One pixel wider than the tile it holds, so fractional zoom does not open seams
+       between exactly-adjacent tiles. The extra pixel overlaps the neighbour. */
     width: 257px; height: 257px; user-select: none; -webkit-user-drag: none;
   }
   #overlay { position: absolute; inset: 0; pointer-events: none; }
   #overlay .hit { pointer-events: auto; cursor: pointer; }
 
-  /* The contour layer is built once and moved by a single transform, the way the tiles
-     are, because 30,000 vertices rebuilt on every frame would cost more than the rest of
-     the map put together. `vector-effect` is what makes that safe: the group is scaled by
-     the zoom, and without it a hairline at zoom 13 would be a 60 px band at zoom 19. */
+  /* The contour layer is built once and moved by one transform, as the tiles are.
+     `vector-effect` keeps a hairline a hairline while the group is scaled by the zoom. */
   #contours { position: absolute; inset: 0; pointer-events: none; }
   #contours path { fill: none; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
-  /* The ramp is pitched to read on satellite imagery, which is dark. On the street map,
-     which is nearly white, the same colours need taking down. */
+  /* The ramp is pitched to read on satellite imagery. The street map is nearly white. */
   #contours.street { filter: brightness(.62) saturate(1.25); }
-  /* Zoomed out far enough that a 1 m sheet would draw as a solid wash, only the index
-     lines are kept. Hiding them is what makes the shape of the ground legible. */
+  /* Zoomed out far enough that a 1 m sheet would draw as a wash, only index lines stay. */
   #contours.sparse .minor { display: none; }
 
   .map-ui {
     position: absolute; z-index: 5;
     background: var(--panel);
     background: color-mix(in srgb, var(--panel) 94%, transparent);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-    box-shadow: var(--shadow);
-    backdrop-filter: blur(6px);
+    border: 1px solid var(--line); border-radius: var(--radius-sm);
+    box-shadow: var(--shadow); backdrop-filter: blur(6px);
   }
   #layers { top: 12px; right: 12px; display: flex; overflow: hidden; }
   #layers button {
@@ -182,7 +249,7 @@
   #layers button + button { border-left: 1px solid var(--line); }
   #layers button.on { background: var(--accent); color: var(--on-accent); }
 
-  #overlays { top: 57px; right: 12px; display: flex; overflow: hidden; }
+  #overlays { top: 51px; right: 12px; display: flex; overflow: hidden; }
   #overlays button {
     border: 0; background: none; padding: 7px 12px; font: inherit; font-size: 12.5px;
     cursor: pointer; color: var(--muted); display: flex; align-items: center; gap: 7px;
@@ -197,9 +264,7 @@
   #overlays button.failed { color: var(--bad); }
   #overlays button.failed .pip { background: var(--bad); }
 
-  #zoom {
-    top: 102px; right: 12px; display: flex; flex-direction: column; overflow: hidden;
-  }
+  #zoom { top: 90px; right: 12px; display: flex; flex-direction: column; overflow: hidden; }
   #zoom button {
     border: 0; background: none; width: 32px; height: 30px; font: inherit; font-size: 16px;
     cursor: pointer; color: var(--ink); display: grid; place-items: center;
@@ -207,32 +272,30 @@
   #zoom button + button { border-top: 1px solid var(--line); }
   #zoom button:hover { background: var(--accent-wash); color: var(--accent-deep); }
 
-  #legend { top: 12px; left: 12px; padding: 10px 12px; font-size: 12px; max-width: 240px; }
+  #legend { top: 12px; left: 12px; padding: 9px 11px; font-size: 12px; max-width: 220px; }
   #legend h4 {
-    margin: 0 0 7px; font-size: 10.5px; text-transform: uppercase;
-    letter-spacing: .07em; color: var(--muted); font-weight: 600;
+    margin: 0 0 6px; font-size: 10px; text-transform: uppercase;
+    letter-spacing: .07em; color: var(--muted); font-weight: 700;
   }
   #legend .lrow { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
-  #legend .sw { width: 17px; height: 11px; border-radius: 3px; flex: none; }
+  #legend .sw { width: 16px; height: 10px; border-radius: 3px; flex: none; }
   #legend .sw.faint { opacity: .38; }
   #legend .sw.line { height: 0; border-top: 2.5px solid #e31a1c; border-radius: 0; }
-  #legend .sw.dot { width: 11px; height: 11px; border-radius: 50%; }
-  #legend .sub { margin: 1px 0 5px 25px; font-size: 11px; color: var(--muted); }
+  #legend .sw.dot { width: 10px; height: 10px; border-radius: 50%; }
+  #legend .sub { margin: 1px 0 5px 24px; font-size: 11px; color: var(--muted); }
 
   #attribution {
     position: absolute; bottom: 0; right: 0; z-index: 5;
-    background: var(--panel);
-    background: color-mix(in srgb, var(--panel) 85%, transparent);
+    background: var(--panel); background: color-mix(in srgb, var(--panel) 85%, transparent);
     font-size: 10.5px; color: var(--muted); padding: 2px 7px; border-top-left-radius: 5px;
   }
   #scale {
-    position: absolute; bottom: 24px; right: 12px; z-index: 5;
+    position: absolute; bottom: 22px; right: 12px; z-index: 5;
     font-size: 11px; color: var(--ink); text-align: right;
     text-shadow: 0 0 3px var(--panel), 0 0 3px var(--panel), 0 0 3px var(--panel);
   }
-  #scale .bar {
-    height: 5px; border: 1.5px solid currentColor; border-top: 0; margin: 2px 0 0 auto;
-  }
+  #scale .bar { height: 5px; border: 1.5px solid currentColor; border-top: 0; margin: 2px 0 0 auto; }
+
   #banner {
     position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 6;
     background: var(--accent-deep); color: var(--on-accent); font-size: 12.5px;
@@ -240,206 +303,95 @@
   }
   #map.picking #banner { display: block; }
 
+  /* A file may be dropped anywhere on the map, so the target is the map itself. */
+  #dropveil {
+    position: absolute; inset: 0; z-index: 8; display: none; place-items: center;
+    background: color-mix(in srgb, var(--accent-deep) 45%, transparent);
+    color: #fff; font-size: 15px; font-weight: 600;
+  }
+  #dropveil.on { display: grid; }
+  #dropveil span { border: 2px dashed rgba(255,255,255,.8); border-radius: var(--radius); padding: 18px 26px; }
+
   /* ---------------- panel ---------------- */
   #panel {
-    width: var(--panel-width); flex: none; background: var(--panel);
-    border-left: 1px solid var(--line); overflow-y: auto; overscroll-behavior: contain;
+    width: 384px; flex: none; background: var(--panel); border-left: 1px solid var(--line);
+    display: flex; flex-direction: column; min-height: 0;
   }
-  .block { padding: 16px 18px; border-bottom: 1px solid var(--line); }
-  .block > h2 {
-    margin: 0 0 12px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em;
-    color: var(--muted); font-weight: 700; display: flex; align-items: center; gap: 8px;
+  #tabs { flex: none; display: none; border-bottom: 1px solid var(--line); padding: 0 8px; gap: 2px; }
+  #tabs.on { display: flex; }
+  #tabs button {
+    font: inherit; font-size: 13px; border: 0; background: none; cursor: pointer;
+    color: var(--muted); padding: 11px 12px 9px; border-bottom: 2px solid transparent;
   }
-  .block > h2 .step {
-    width: 18px; height: 18px; border-radius: 50%; background: var(--accent-wash);
-    color: var(--accent-deep); display: grid; place-items: center;
-    font-size: 10px; letter-spacing: 0; flex: none;
+  #tabs button:hover { color: var(--ink); }
+  #tabs button.on { color: var(--accent-deep); border-bottom-color: var(--accent); font-weight: 600; }
+  #results { flex: 1; overflow-y: auto; overscroll-behavior: contain; }
+
+  .sec { padding: 14px 16px; border-bottom: 1px solid var(--line-soft); }
+  .sec:last-child { border-bottom: 0; }
+  .sec > h3 {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+    font-weight: 700; margin-bottom: 9px;
   }
 
-  /* --- drop zone --- */
-  #drop {
-    border: 1.5px dashed var(--line); border-radius: var(--radius); padding: 20px 14px;
-    text-align: center; color: var(--muted); cursor: pointer; background: var(--raised);
-    transition: border-color .12s, background .12s;
-  }
-  #drop:hover, #drop.over { border-color: var(--accent); background: var(--accent-wash); }
-  #drop.ready { border-style: solid; border-color: var(--accent); background: var(--accent-wash); }
-  #drop strong { color: var(--ink); display: block; font-size: 14px; margin-bottom: 3px; }
-  #drop .file { color: var(--accent-deep); font-weight: 600; word-break: break-all; }
-  #drop svg { width: 22px; height: 22px; margin-bottom: 6px; opacity: .55; }
-
-  /* --- fields --- */
-  .field { margin-top: 14px; }
-  .field:first-child { margin-top: 0; }
-  .field > label, .field .caption {
-    font-size: 12px; color: var(--ink-soft); font-weight: 600;
-    display: flex; align-items: baseline; gap: 6px; margin-bottom: 5px;
-  }
-  .field .unit { font-weight: 400; color: var(--muted); }
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-  .grid2.lopsided { grid-template-columns: 1.7fr 1fr; gap: 10px; }
-
-  input[type=number], input[type=text], select {
-    width: 100%; font: inherit; font-size: 13.5px; padding: 7px 9px;
-    border: 1px solid var(--line); border-radius: var(--radius-sm);
-    color: var(--ink); background: var(--panel); appearance: none;
-  }
-  select { background-image: none; cursor: pointer; }
-  input:focus, select:focus, button:focus-visible {
-    outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent);
-  }
-  .hint { font-size: 11.5px; color: var(--muted); margin-top: 5px; line-height: 1.45; }
-  .hint.indented { margin-left: 24px; }
-  .hint b { color: var(--ink-soft); font-weight: 600; }
-
-  .switch { display: flex; align-items: flex-start; gap: 9px; font-size: 13px; }
-  .switch input { margin: 3px 0 0; flex: none; accent-color: var(--accent); }
-  .switch span { color: var(--ink); }
-  /* A switch the host cannot honour still has to look unavailable, not merely off. */
-  .switch input:disabled { cursor: not-allowed; }
-  .switch:has(input:disabled) span { color: var(--muted); }
-
-  /* --- the "what is this" disclosures --- */
-  details.help { margin-top: 6px; }
-  details.help > summary {
-    cursor: pointer; font-size: 11.5px; color: var(--accent-deep); list-style: none;
-    display: inline-flex; align-items: center; gap: 4px; user-select: none;
-  }
-  details.help > summary::-webkit-details-marker { display: none; }
-  details.help > summary::before {
-    content: "?"; width: 14px; height: 14px; border-radius: 50%;
-    border: 1px solid currentColor; font-size: 10px; font-weight: 700;
-    display: grid; place-items: center; flex: none;
-  }
-  details.help > summary:hover { text-decoration: underline; }
-  details.help .body {
-    margin-top: 7px; padding: 10px 12px; background: var(--raised);
-    border: 1px solid var(--line); border-radius: var(--radius-sm);
-    font-size: 12.5px; color: var(--ink-soft); line-height: 1.5;
-  }
-  details.help .body p { margin: 0 0 8px; }
-  details.help .body p:last-child { margin-bottom: 0; }
-  details.help .body table { width: 100%; border-collapse: collapse; margin: 8px 0; }
-  details.help .body td {
-    padding: 2px 0; font-size: 12px; vertical-align: top;
-  }
-  details.help .body td:last-child {
-    text-align: right; font-variant-numeric: tabular-nums; color: var(--ink);
-    font-weight: 600;
-  }
-
-  /* --- buttons --- */
-  button.action {
-    width: 100%; margin-top: 16px; padding: 11px 12px; font: inherit; font-size: 14px;
-    font-weight: 600; color: var(--on-accent); background: var(--accent-deep); border: 0;
-    border-radius: var(--radius-sm); cursor: pointer; transition: background .12s;
-  }
-  button.action:hover:not(:disabled) { background: var(--accent); }
-  button.action:disabled { background: var(--muted); opacity: .5; cursor: not-allowed; }
-
-  button.ghost {
-    font: inherit; font-size: 12px; padding: 6px 11px; border: 1px solid var(--line);
-    background: var(--panel); border-radius: var(--radius-sm); cursor: pointer;
-    color: var(--ink-soft); white-space: nowrap;
-  }
-  button.ghost:hover { border-color: var(--accent); color: var(--accent-deep); }
-  button.ghost.on {
-    background: var(--accent); border-color: var(--accent); color: var(--on-accent);
-  }
-  button.ghost:disabled { opacity: .5; cursor: not-allowed; }
-
-  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .row code {
-    font-size: 11.5px; color: var(--accent-deep); background: var(--accent-wash);
-    padding: 3px 7px; border-radius: 5px;
-  }
-
-  /* --- status --- */
-  #status { display: none; }
-  #status.on { display: block; }
-  .spinner {
-    width: 16px; height: 16px; border: 2px solid var(--line);
-    border-top-color: var(--accent); border-radius: 50%;
-    animation: spin .8s linear infinite; flex: none;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .working { display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
-  .bar {
-    height: 3px; border-radius: 2px; background: var(--line-soft);
-    margin-top: 10px; overflow: hidden;
-  }
-  .bar i {
-    display: block; height: 100%; width: 35%; border-radius: 2px; background: var(--accent);
-    animation: slide 1.4s ease-in-out infinite;
-  }
-  @keyframes slide {
-    0% { transform: translateX(-100%); } 100% { transform: translateX(340%); }
-  }
-
-  /* --- site cards --- */
   .card {
-    border: 1px solid var(--line); border-radius: var(--radius); padding: 0;
-    margin-bottom: 10px; cursor: pointer; background: var(--panel); overflow: hidden;
-    transition: border-color .12s, box-shadow .12s;
+    border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 9px;
+    cursor: pointer; background: var(--panel); overflow: hidden;
   }
+  .card:last-child { margin-bottom: 0; }
   .card:hover { border-color: var(--accent); }
   .card.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-wash); }
   .card .head {
-    display: flex; align-items: center; gap: 10px; padding: 11px 13px;
+    display: flex; align-items: center; gap: 9px; padding: 10px 12px;
     background: var(--raised); border-bottom: 1px solid var(--line);
   }
   .card.sel .head { background: var(--accent-wash); }
   .card .rank {
-    width: 23px; height: 23px; border-radius: 50%; background: var(--accent-deep);
+    width: 22px; height: 22px; border-radius: 50%; background: var(--accent-deep);
     color: var(--on-accent); font-size: 12px; font-weight: 700; display: grid;
     place-items: center; flex: none;
   }
   .card.alt .rank { background: var(--muted); }
   .card.rejected .rank { background: var(--bad); }
-  .card .headline { font-size: 15.5px; font-weight: 650; flex: 1; }
-  .card .headline em { font-style: normal; font-weight: 400; color: var(--muted); font-size: 13px; }
-  .card .body { padding: 11px 13px; }
-  .card .coords {
-    font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums;
-  }
+  .card .headline { font-size: 15px; font-weight: 650; flex: 1; }
+  .card .headline em { font-style: normal; font-weight: 400; color: var(--muted); font-size: 12.5px; }
+  .card .body { padding: 10px 12px; }
+  .card .coords { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
   .chip {
-    font-size: 10px; text-transform: uppercase; letter-spacing: .06em; font-weight: 700;
-    padding: 3px 8px; border-radius: 20px; background: var(--line-soft); color: var(--muted);
-    flex: none;
+    font-size: 10px; text-transform: uppercase; letter-spacing: .05em; font-weight: 700;
+    padding: 3px 8px; border-radius: 20px; background: var(--line-soft); color: var(--muted); flex: none;
   }
   .chip.high { background: var(--good-wash); color: var(--good); }
   .chip.medium { background: var(--warn-wash); color: var(--warn); }
   .chip.low { background: var(--bad-wash); color: var(--bad); }
 
-  ul.why { margin: 9px 0 0; padding-left: 16px; color: var(--ink-soft); font-size: 12.5px; }
+  ul.why { margin: 8px 0 0; padding-left: 15px; color: var(--ink-soft); font-size: 12.5px; }
   ul.why li { margin: 2px 0; }
 
   .stats {
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-top: 11px;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-top: 10px;
     background: var(--line); border: 1px solid var(--line); border-radius: var(--radius-sm);
     overflow: hidden;
   }
-  .stats.duo { grid-template-columns: repeat(2, 1fr); }
-  .stat { background: var(--panel); padding: 8px 10px; }
+  /* Values line up along the bottom, so a two-line key does not push one number
+     out of the row. */
+  .stat {
+    background: var(--panel); padding: 7px 9px; display: flex; flex-direction: column;
+    justify-content: space-between; min-height: 52px;
+  }
   .stat .k {
-    font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
-    font-weight: 600;
+    font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600;
   }
-  .stat .v {
-    font-size: 14.5px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 1px;
-  }
-  .stat .v small { font-weight: 400; color: var(--muted); font-size: 11.5px; }
+  .stat .v { font-size: 14px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 1px; }
+  .stat .v small { font-weight: 400; color: var(--muted); font-size: 11px; }
 
   .say {
     margin-top: 10px; font-size: 12.5px; color: var(--ink-soft); background: var(--raised);
     border-left: 3px solid var(--accent); border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-    padding: 8px 11px;
+    padding: 8px 10px;
   }
-  .note {
-    font-size: 12px; padding: 8px 11px; border-radius: var(--radius-sm); margin-top: 8px;
-    line-height: 1.45;
-  }
+  .note { font-size: 12px; padding: 8px 10px; border-radius: var(--radius-sm); margin-top: 8px; }
   .note.warn { background: var(--warn-wash); color: var(--warn); }
   .note.bad { background: var(--bad-wash); color: var(--bad); }
   .note.info { background: var(--accent-wash); color: var(--accent-deep); }
@@ -448,28 +400,30 @@
   table.kv { width: 100%; border-collapse: collapse; font-size: 12.5px; }
   table.kv td { padding: 4px 0; vertical-align: top; border-bottom: 1px solid var(--line-soft); }
   table.kv tr:last-child td { border-bottom: 0; }
-  table.kv td:first-child { color: var(--muted); padding-right: 12px; white-space: nowrap; }
+  table.kv td:first-child { color: var(--muted); padding-right: 12px; }
   table.kv td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
 
-  details.more { border-top: 1px solid var(--line-soft); margin-top: 4px; }
+  details.more { margin-top: 8px; }
   details.more > summary {
     cursor: pointer; font-size: 12px; color: var(--accent-deep); list-style: none;
-    padding: 7px 0; user-select: none;
+    padding: 5px 0; user-select: none;
   }
   details.more > summary::-webkit-details-marker { display: none; }
   details.more > summary::before { content: "\25B8  "; }
   details.more[open] > summary::before { content: "\25BE  "; }
 
-  .empty {
-    color: var(--muted); font-size: 13px; text-align: center; padding: 26px 18px;
-    line-height: 1.6;
+  .empty { color: var(--muted); font-size: 13px; text-align: center; padding: 40px 24px; line-height: 1.6; }
+  .empty strong { display: block; color: var(--ink); font-size: 14px; margin-bottom: 4px; }
+  .working { display: flex; align-items: center; gap: 10px; font-size: 13.5px; padding: 16px; }
+  .spinner {
+    width: 15px; height: 15px; border: 2px solid var(--line); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin .8s linear infinite; flex: none;
   }
-  .empty svg { width: 30px; height: 30px; opacity: .35; margin-bottom: 8px; }
-  .foot { padding: 14px 18px 22px; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
-  @media (max-width: 900px) {
+  @media (max-width: 980px) {
     main { flex-direction: column; }
-    #map { height: 48vh; flex: none; }
+    #map { height: 46vh; flex: none; }
     #panel { width: auto; border-left: 0; border-top: 1px solid var(--line); flex: 1; }
   }
 </style>
@@ -484,11 +438,93 @@
     </svg>
   </span>
   <h1>Pond Catchment Analysis</h1>
-  <span class="sub">A contour map in, a pond site and its catchment out</span>
   <span class="spacer"></span>
   <span id="health"><span class="dot"></span><span class="txt">checking</span></span>
   <a id="docs-link" href="/docs" target="_blank" rel="noopener">API docs</a>
 </header>
+
+<div id="bar">
+  <div class="ctl">
+    <span class="lbl">Contour map</span>
+    <input type="file" id="file" hidden
+           accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz">
+    <button class="btn" id="choose">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+      </svg>
+      Choose .kml or .kmz
+    </button>
+    <span id="filechip" hidden>
+      <span class="name"></span><span class="size"></span>
+      <button class="x" id="clear-file" title="Remove" aria-label="Remove file">&times;</button>
+    </span>
+  </div>
+
+  <div class="ctl">
+    <span class="lbl">Land cover and soil</span>
+    <select id="cn-preset" aria-label="Land cover and soil"></select>
+  </div>
+
+  <div class="ctl">
+    <span class="lbl">Pond depth</span>
+    <span class="unit">
+      <input type="number" id="target_depth_m" value="3" min="0.5" step="0.5" style="width:88px">
+      <i>m</i>
+    </span>
+  </div>
+
+  <div class="ctl adv-wrap">
+    <span class="lbl">&nbsp;</span>
+    <button class="btn" id="adv-toggle" aria-expanded="false">Advanced</button>
+    <div id="adv" hidden>
+      <div class="f">
+        <label class="k" for="curve_number">Curve number</label>
+        <input type="number" id="curve_number" value="75" min="30" max="98" step="1">
+        <div class="sub" id="cn-note"></div>
+      </div>
+      <div class="f pair">
+        <div>
+          <label class="k" for="rainfall_mm">Rainfall mm/yr</label>
+          <input type="number" id="rainfall_mm" placeholder="auto" min="1" step="10">
+        </div>
+        <div>
+          <label class="k" for="grid_resolution">Grid size m</label>
+          <input type="number" id="grid_resolution" placeholder="auto" min="2" max="20" step="0.5">
+        </div>
+      </div>
+      <div class="f">
+        <label class="k" for="top_n">Sites to return</label>
+        <input type="number" id="top_n" value="3" min="1" max="10" step="1">
+      </div>
+      <hr>
+      <div class="f">
+        <label class="check">
+          <input type="checkbox" id="ensemble">
+          <span>Cross-check on three grids</span>
+        </label>
+        <div class="sub" id="ensemble-note">
+          Repeats the run at 5.0, 3.5 and 2.5 m for an error bar on the area. About three
+          times slower.
+        </div>
+      </div>
+      <div class="f">
+        <label class="k">Pour point</label>
+        <div class="row">
+          <button class="btn" id="pick">Pick on the map</button>
+          <code id="pour-txt" hidden></code>
+          <button class="btn" id="pick-clear" hidden>Clear</button>
+        </div>
+        <div class="sub">Analyses one spot instead of ranking sites.</div>
+      </div>
+    </div>
+  </div>
+
+  <span class="spacer"></span>
+  <div id="derived"></div>
+  <button class="primary" id="run" disabled>Analyse</button>
+  <div id="prog"><i></i></div>
+</div>
 
 <main>
   <div id="map">
@@ -496,6 +532,7 @@
     <svg id="contours" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
     <svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg>
     <div id="banner">Click the map to place the pour point</div>
+    <div id="dropveil"><span>Drop the contour map</span></div>
     <div id="layers" class="map-ui">
       <button data-layer="satellite" class="on">Satellite</button>
       <button data-layer="street">Street</button>
@@ -517,178 +554,17 @@
   </div>
 
   <aside id="panel">
-    <!-- 1. the file ------------------------------------------------------ -->
-    <div class="block">
-      <h2><span class="step">1</span> Contour map</h2>
-      <div id="drop">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-             stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
-        </svg>
-        <strong>Drop a .kml or .kmz file here</strong>
-        <span>or click to pick one</span>
-      </div>
-      <input type="file" id="file" hidden
-             accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz">
-      <div class="hint" style="margin-top:8px">
-        Once a file is chosen, <b>Contours</b> at the top right of the map draws its
-        lines. Leave them on and the catchment lands on top of them, which is how you
-        check the boundary follows the ridges.
-      </div>
-    </div>
-
-    <!-- 2. the settings -------------------------------------------------- -->
-    <div class="block">
-      <h2><span class="step">2</span> Settings</h2>
-
-      <!-- rainfall -->
-      <div class="field">
-        <label for="rainfall_mm">Yearly rainfall <span class="unit">mm</span></label>
-        <div class="row">
-          <input type="number" id="rainfall_mm" placeholder="From weather records" min="1" step="10"
-                 style="flex:1;min-width:120px">
-          <button class="ghost" id="rain-fetch">Look up</button>
-        </div>
-        <div class="hint" id="rain-note">
-          Leave this blank and the service reads ten years of daily rainfall for your site
-          from Open-Meteo, which is free and needs no account. Type a figure to use your
-          own gauge instead.
-        </div>
-        <details class="help">
-          <summary>Where the rainfall comes from</summary>
-          <div class="body">
-            <p>Open-Meteo publishes the ERA5 weather record as a daily rainfall total for
-              any point on land. The service asks for the last ten full years, keeps the
-              days above 1 mm, and averages them into one year.</p>
-            <p>Ten years rather than one because the total swings a lot. Around this
-              sample map it ran from 1,057 mm to 1,858 mm over the last decade.</p>
-            <p>One caveat travels with the number. ERA5 sits on a grid about 25 km wide,
-              so it spreads a village's rain over more days than a rain gauge in that
-              village would. Runoff grows faster than rainfall, so the yield you get back
-              is on the low side. Check it against the nearest gauge before you cost a
-              design.</p>
-          </div>
-        </details>
-      </div>
-
-      <!-- curve number -->
-      <div class="field">
-        <label for="curve_number">Curve number</label>
-        <div class="grid2 lopsided">
-          <select id="cn-preset" aria-label="Land cover and soil"></select>
-          <input type="number" id="curve_number" value="75" min="30" max="98" step="1">
-        </div>
-        <div class="hint" id="cn-note"></div>
-        <details class="help">
-          <summary>What the curve number means</summary>
-          <div class="body">
-            <p>It is one number, from 30 to 98, for how readily the ground turns rain into
-              runoff instead of soaking it up. Low means thirsty ground: deep sand under
-              forest sheds almost nothing. High means sealed ground: a concrete yard sheds
-              almost all of it. It bundles up the soil type, what is growing on it and how
-              wet it already was, because a design does not get to measure those
-              separately.</p>
-            <p>The whole method is two lines. The curve number sets how much water the
-              soil can still take:</p>
-            <p><b>S = 25400 / CN &minus; 254</b>, in millimetres. At CN 75 that is 85 mm.</p>
-            <p>Then each day of rain <b>P</b> produces runoff <b>Q</b>:</p>
-            <p><b>Q = (P &minus; 0.2S)&sup2; / (P &minus; 0.8S)</b>, and nothing at all
-              until P passes 0.2S. At CN 75 the first 17 mm of a day's rain runs off
-              nowhere.</p>
-            <p>Two things follow, and both matter here. Runoff grows faster than rainfall,
-              so one 100 mm day yields far more than ten 10 mm days. And the choice of
-              curve number moves the answer a long way: 65 to 85 roughly triples the
-              yearly runoff. Pick it from the land, and treat the result as a range.</p>
-            <p style="margin-top:10px"><b>Rough guide, cultivated land</b></p>
-            <table>
-              <tr><td>Sandy soil that drains fast (group A)</td><td>65</td></tr>
-              <tr><td>Loam (group B)</td><td>75</td></tr>
-              <tr><td>Clay loam, slow to drain (group C)</td><td>82</td></tr>
-              <tr><td>Heavy clay, nearly sealed (group D)</td><td>86</td></tr>
-            </table>
-            <p>The default of 75 is loam under row crops, which is the ground around the
-              sample map.</p>
-          </div>
-        </details>
-      </div>
-
-      <div class="grid2" style="margin-top:14px">
-        <div class="field" style="margin:0">
-          <label for="target_depth_m">Pond depth <span class="unit">m</span></label>
-          <input type="number" id="target_depth_m" value="3" min="0.5" step="0.5">
-        </div>
-        <div class="field" style="margin:0">
-          <label for="top_n">Sites to return</label>
-          <input type="number" id="top_n" value="3" min="1" max="10" step="1">
-        </div>
-      </div>
-
-      <details class="more" style="margin-top:14px">
-        <summary>More options</summary>
-        <div style="padding-bottom:10px">
-          <div class="field">
-            <label class="switch">
-              <input type="checkbox" id="ensemble">
-              <span>Cross-check on three grids</span>
-            </label>
-            <div class="hint indented">
-              Runs the same site at 5.0, 3.5 and 2.5 m and reports how far the three
-              disagree. Takes about three times as long, and it is what turns a catchment
-              area into one you can act on.
-            </div>
-          </div>
-
-          <div class="field">
-            <label for="grid_resolution">Grid size <span class="unit">m</span></label>
-            <input type="number" id="grid_resolution" placeholder="From the contour spacing"
-                   min="2" max="20" step="0.5">
-            <div class="hint">
-              Blank means the service works it out from how far apart the contour lines
-              are. Set it only if you want a coarser run.
-            </div>
-          </div>
-
-          <div class="field">
-            <div class="caption">Pour point</div>
-            <div class="row">
-              <button class="ghost" id="pick">Pick on the map</button>
-              <code id="pour-txt" hidden></code>
-              <button class="ghost" id="pick-clear" hidden>Clear</button>
-            </div>
-            <div class="hint">
-              Set one and the service analyses that spot instead of ranking sites of its
-              own. Use it to check somewhere you have already chosen.
-            </div>
-          </div>
-        </div>
-      </details>
-
-      <button class="action" id="run" disabled>Analyse</button>
-    </div>
-
-    <div class="block" id="status"></div>
+    <div id="tabs"></div>
     <div id="results"></div>
-
-    <div class="foot">
-      Catchments are traced by steepest descent on a grid built from the contour lines.
-      Runoff is SCS-CN, worked out for each rain day and added up.
-      <a href="/docs" target="_blank" rel="noopener">Full API documentation</a>.
-    </div>
   </aside>
 </main>
 
 <script>
 "use strict";
 
-/* --------------------------------------------------------------------------
- * The service
- * ----------------------------------------------------------------------- */
-// Opened from disk, the page still talks to a locally running service. Served by that
-// service, which is the normal case, it talks to its own origin, so the deployed URL
-// needs no configuration at all.
+/* Served by the service it talks to, so the deployed URL needs no configuration.
+   Opened from disk, it falls back to a local run. */
 const API = location.protocol === "file:" ? "http://localhost:8000" : "";
-const ensembleBox = document.getElementById("ensemble");
-const ensembleHint = document.querySelector("#ensemble").closest(".field").querySelector(".hint");
 document.getElementById("docs-link").href = API + "/docs";
 
 /* --------------------------------------------------------------------------
@@ -1272,7 +1148,6 @@ function render() {
     renderContours();
     renderOverlay();
     renderScale();
-    updateRainButton();
   });
 }
 
@@ -1387,7 +1262,6 @@ function setPourPoint(lon, lat) {
   text.textContent = pourPoint ? `${pourPoint.lat.toFixed(5)}, ${pourPoint.lon.toFixed(5)}` : "";
   text.hidden = !pourPoint;
   document.getElementById("pick-clear").hidden = !pourPoint;
-  updateRainButton();
   render();
 }
 document.getElementById("pick").onclick = () => setPicking(!picking);
@@ -1430,141 +1304,161 @@ function noteList(messages, kind) {
   return messages.map((message) => h("div", { class: "note " + kind, text: message }));
 }
 
+
 /* --------------------------------------------------------------------------
- * Curve number presets
+ * Land cover, and the curve number behind it
  *
  * Standard SCS-CN values for cultivated and grazed land on the four hydrologic soil
- * groups, from A (sand, drains fast) to D (clay, nearly sealed). They are here because a
- * planner knows what is growing on the ground and what the soil is like, and does not
- * know that those two facts together make 82.
+ * groups, A (sand) to D (clay). The bar asks for the land, not the number, because a
+ * planner knows what grows on the ground and not that it makes 82. The number itself is
+ * in Advanced for anyone who has one.
  * ----------------------------------------------------------------------- */
 const CN_PRESETS = [
-  ["Row crops on loam soil", 75, "Ploughed fields on medium soil. The usual village catchment, and the default."],
-  ["Row crops on sandy soil", 65, "Light soil that drains fast, so less of the rain runs off."],
-  ["Row crops on clay soil", 86, "Heavy soil that seals up, so most of a downpour runs off."],
-  ["Paddy and small grain", 75, "Bunded fields hold water back until they overtop."],
-  ["Grazing land in good condition", 61, "Thick cover, little bare ground."],
-  ["Grazing land, overgrazed", 79, "Bare patches and compacted soil shed far more."],
-  ["Scrub and open woodland", 55, "Litter and roots take the rain in."],
-  ["Bare or fallow ground", 86, "Nothing holding the surface together."],
-  ["Village, roofs and hard yards", 82, "Roofs and compacted lanes between the houses."],
+  ["Row crops, loam", 75],
+  ["Row crops, sandy soil", 65],
+  ["Row crops, clay soil", 86],
+  ["Paddy and small grain", 75],
+  ["Grazing, good cover", 61],
+  ["Grazing, overgrazed", 79],
+  ["Scrub and open woodland", 55],
+  ["Bare or fallow", 86],
+  ["Village, roofs and yards", 82],
 ];
 
 const preset = document.getElementById("cn-preset");
 const cnInput = document.getElementById("curve_number");
 const cnNote = document.getElementById("cn-note");
-preset.append(...CN_PRESETS.map(([label, value], i) =>
-  h("option", { value: String(i), text: `${label} (${value})` })));
-preset.append(h("option", { value: "custom", text: "Something else" }));
+preset.append(...CN_PRESETS.map(([label, cn], i) =>
+  h("option", { value: String(i), text: `${label} (CN ${cn})` })));
+preset.append(h("option", { value: "custom", text: "Custom" }));
 
 function syncCurveNumber(fromPreset) {
-  if (fromPreset && preset.value !== "custom") {
-    cnInput.value = CN_PRESETS[Number(preset.value)][1];
-  }
-  const value = Number(cnInput.value);
-  const match = CN_PRESETS.findIndex(([, cn]) => cn === value);
+  if (fromPreset && preset.value !== "custom") cnInput.value = CN_PRESETS[Number(preset.value)][1];
+  const match = CN_PRESETS.findIndex(([, cn]) => cn === Number(cnInput.value));
   if (!fromPreset) preset.value = match >= 0 ? String(match) : "custom";
-  const chosen = preset.value === "custom" ? null : CN_PRESETS[Number(preset.value)];
-  cnNote.textContent = chosen
-    ? chosen[2]
-    : "Higher means more of the rain runs off. 30 is sand under forest, 98 is concrete.";
+  cnNote.textContent = "30 is sand under forest, 98 is concrete. Higher sheds more.";
 }
 preset.onchange = () => syncCurveNumber(true);
 cnInput.oninput = () => syncCurveNumber(false);
 syncCurveNumber(false);
 
+/* ---- the Advanced popover ---- */
+const advEl = document.getElementById("adv");
+const advToggle = document.getElementById("adv-toggle");
+function showAdvanced(on) {
+  advEl.hidden = !on;
+  advToggle.classList.toggle("on", on);
+  advToggle.setAttribute("aria-expanded", String(on));
+}
+advToggle.onclick = () => showAdvanced(advEl.hidden);
+document.addEventListener("pointerdown", (event) => {
+  if (!advEl.hidden && !event.target.closest(".adv-wrap")) showAdvanced(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") { showAdvanced(false); if (picking) setPicking(false); }
+});
+// Picking happens on the map, which the popover covers.
+document.getElementById("pick").addEventListener("click", () => showAdvanced(false));
+showAdvanced(false);
+
 /* --------------------------------------------------------------------------
- * Rainfall lookup
+ * Rainfall
  *
- * The panel asks for a yearly rainfall figure, and most people filling it in do not have
- * one to hand. This fetches the real one for the site from the same free feed the
- * analysis uses, so the box shows their village rather than a default they would have to
- * know was wrong.
+ * Nobody has an annual rainfall figure to hand, and the service can read one. So the bar
+ * does not ask: as soon as the contours are read, this fetches the ten-year mean for the
+ * middle of the sheet and shows it. The request still leaves `rainfall_mm` out, so the
+ * analysis reads the figure for the site it picks rather than the one shown here; the
+ * two differ only inside one 25 km ERA5 cell. Advanced overrides it.
  * ----------------------------------------------------------------------- */
-const rainButton = document.getElementById("rain-fetch");
-const rainNote = document.getElementById("rain-note");
 const rainInput = document.getElementById("rainfall_mm");
-const DEFAULT_RAIN_NOTE = rainNote.textContent;
+const derivedEl = document.getElementById("derived");
+let autoRain = null;
 
-function updateRainButton() {
-  const where = pourPoint || mapCentreIfZoomed();
-  rainButton.disabled = !where;
-  rainButton.title = where
-    ? "Read the last ten years for this spot"
-    : "Pick a pour point, or move the map over the area first";
-}
-function mapCentreIfZoomed() {
-  if (view.zoom < 8) return null;
-  const [lon, lat] = unproject(view.fx, view.fy);
-  return { lon, lat };
-}
-
-rainButton.onclick = async () => {
-  const where = pourPoint || mapCentreIfZoomed();
-  if (!where) return;
-  rainButton.disabled = true;
-  rainButton.textContent = "Reading";
+async function lookupRainfall(bbox) {
+  const lat = (bbox[1] + bbox[3]) / 2, lon = (bbox[0] + bbox[2]) / 2;
+  autoRain = "loading";
+  renderDerived();
   try {
-    const url = `${API}/api/v1/rainfall?lat=${where.lat.toFixed(4)}&lon=${where.lon.toFixed(4)}`;
+    const url = `${API}/api/v1/rainfall?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}`;
     const body = await (await fetch(url)).json();
-    if (body.status !== "ok") throw new Error(body.detail || "no answer");
-    rainInput.value = Math.round(body.annual_rainfall_mm);
-    rainNote.replaceChildren(
-      h("b", { text: `${num(body.annual_rainfall_mm)} mm a year over ${body.rain_days} rain days. ` }),
-      body.is_measured
-        ? `From ${body.source}. Wettest day on record ${num(body.wettest_day_mm)} mm.`
-        : `The weather service could not be reached, so this is ${body.source}.`,
-    );
-  } catch (error) {
-    rainNote.replaceChildren(h("b", { text: "Could not read the rainfall. " }),
-                             "Type a figure instead, or leave it blank and let the analysis try.");
-  } finally {
-    rainButton.textContent = "Look up";
-    updateRainButton();
+    if (body.status !== "ok") throw new Error(body.detail);
+    autoRain = {
+      mm: body.annual_rainfall_mm,
+      source: body.is_measured ? "ERA5, 10-year mean" : "regional climatology",
+    };
+  } catch {
+    autoRain = null;
   }
-};
+  renderDerived();
+}
+
+function renderDerived() {
+  const typed = rainInput.value.trim();
+  if (typed) {
+    derivedEl.replaceChildren("Rainfall ", h("b", { text: num(Number(typed)) + " mm/yr" }), " entered");
+  } else if (autoRain === "loading") {
+    derivedEl.textContent = "Reading rainfall records";
+  } else if (autoRain) {
+    derivedEl.replaceChildren("Rainfall ", h("b", { text: num(autoRain.mm) + " mm/yr" }),
+                              " " + autoRain.source);
+  } else {
+    derivedEl.textContent = "";
+  }
+}
+rainInput.oninput = renderDerived;
 
 /* --------------------------------------------------------------------------
  * Results
+ *
+ * Three tabs rather than one column: the sites, the water they yield, and the numbers
+ * the run was built from. Everything follows the selected site, so clicking a shape on
+ * the map changes the water figures with it.
  * ----------------------------------------------------------------------- */
 const resultsEl = document.getElementById("results");
-const statusEl = document.getElementById("status");
-let lastBBox = null;
+const tabsEl = document.getElementById("tabs");
+const TABS = [["sites", "Sites"], ["water", "Water"], ["data", "Data"]];
+let tab = "sites";
 let lastBody = null;
+let lastBBox = null;
 
-function siteCard(site, recommended) {
-  const c = site.catchment;
-  const s = site.storage;
-  const r = site.runoff;
+function sites() {
+  return lastBody ? [lastBody.recommended_site, ...lastBody.alternative_sites] : [];
+}
+function currentSite() {
+  return sites().find((s) => s.rank === selectedRank) || sites()[0];
+}
+
+function siteCard(site, full) {
+  const c = site.catchment, s = site.storage, r = site.runoff;
   const rejected = !site.is_recommended;
 
   const body = h("div", { class: "body" }, [
     h("div", { class: "coords", text: `${site.location.lat.toFixed(5)}, ${site.location.lon.toFixed(5)}` }),
-    h("ul", { class: "why" }, site.why.map((reason) => h("li", { text: reason }))),
+    h("ul", { class: "why" }, (site.why || []).slice(0, 3).map((reason) => h("li", { text: reason }))),
     h("div", { class: "stats" }, [
-      stat("Holds", num(s.capacity_m3), "m³"),
-      stat("Water a year", num(r.annual_runoff_m3), "m³"),
-      stat("Fills", r.fill_ratio < 0 ? "n/a" : num(r.fill_ratio, 2) + "\u00d7"),
+      stat("Capacity", num(s.capacity_m3), "m³"),
+      stat("Annual runoff", num(r.annual_runoff_m3), "m³"),
+      stat("Fills", r.fill_ratio < 0 ? "n/a" : num(r.fill_ratio, 2) + "×"),
     ]),
   ]);
 
-  if (recommended) {
-    body.appendChild(h("div", { class: "stats" }, [
-      stat("Drop across it", num(c.relief_m, 1), "m"),
-      stat("Longest path", num(c.longest_flow_path_m), "m"),
-      stat("Water reaches it in", num(c.time_of_concentration_min, 1), "min"),
-      stat("Above the channel", site.height_above_trunk_m == null
-        ? "n/a" : num(site.height_above_trunk_m, 1), "m"),
-      stat("Runoff depth", num(r.runoff_depth_mm, 1), "mm"),
-      stat("Of the rain", num(r.runoff_coefficient * 100, 1), "%"),
-      stat("Water surface", num(s.surface_area_m2), "m²"),
-      stat("Useful depth", num(s.usable_depth_m ?? s.max_depth_m, 2), "m"),
-      stat("Touches the edge", num(c.edge_contact_pct, 1), "%"),
+  if (full) {
+    body.appendChild(h("details", { class: "more" }, [
+      h("summary", { text: "Catchment detail" }),
+      rows([
+        ["Relief", num(c.relief_m, 1) + " m"],
+        ["Longest flow path", num(c.longest_flow_path_m) + " m"],
+        ["Time of concentration", num(c.time_of_concentration_min, 1) + " min"],
+        ["Above the watercourse", site.height_above_trunk_m == null
+          ? "n/a" : num(site.height_above_trunk_m, 1) + " m"],
+        ["Edge contact", num(c.edge_contact_pct, 1) + " %"],
+        ["Water surface", num(s.surface_area_m2) + " m²"],
+        ["Usable depth", num(s.usable_depth_m ?? s.max_depth_m, 2) + " m"],
+      ]),
     ]));
-    body.appendChild(h("div", { class: "say", text: r.assessment }));
     if (c.is_lower_bound) {
       body.appendChild(h("div", { class: "note warn", text:
-        "The catchment runs off the edge of the map, so this area is a floor and the real one is bigger." }));
+        "The catchment runs off the edge of the sheet, so this area is a floor." }));
     }
   }
   for (const warning of site.warnings || []) {
@@ -1572,7 +1466,7 @@ function siteCard(site, recommended) {
   }
 
   return h("div", {
-    class: "card" + (recommended ? "" : " alt") + (rejected ? " rejected" : "") +
+    class: "card" + (full ? "" : " alt") + (rejected ? " rejected" : "") +
            (site.rank === selectedRank ? " sel" : ""),
     onclick: () => selectSite(site.rank, true),
     onpointerenter: () => { hoverRank = site.rank; render(); },
@@ -1590,13 +1484,147 @@ function siteCard(site, recommended) {
   ]);
 }
 
-// `zoom` is false when the click came from the map itself. Clicking a shape you can
-// already see and having the view jump is disorienting; clicking a card in the list,
-// where the shape may be off screen, it is the whole point.
+function sitesView() {
+  const body = lastBody;
+  const parts = [h("div", { class: "sec" }, [
+    h("h3", { text: "Recommended site" }),
+    siteCard(body.recommended_site, true),
+  ])];
+  if (body.alternative_sites.length) {
+    parts.push(h("div", { class: "sec" }, [
+      h("h3", { text: "Alternatives" }),
+      ...body.alternative_sites.map((site) => siteCard(site, false)),
+    ]));
+  }
+  if (body.warnings.length) {
+    parts.push(h("div", { class: "sec" }, [
+      h("h3", { text: "Warnings" }),
+      ...noteList(body.warnings, "warn"),
+    ]));
+  }
+  return parts;
+}
+
+function waterView() {
+  const site = currentSite(), r = site.runoff, s = site.storage;
+  return [
+    h("div", { class: "sec" }, [
+      h("h3", { text: `Rainfall, site ${site.rank}` }),
+      rows([
+        ["Annual rainfall", num(r.rainfall_mm) + " mm"],
+        ["Rain days", num(r.rain_days)],
+        ["Runoff days", num(r.contributing_days)],
+        ["Source", r.rainfall_source],
+      ]),
+    ]),
+    h("div", { class: "sec" }, [
+      h("h3", { text: "Runoff" }),
+      rows([
+        ["Curve number", num(r.curve_number, 1)],
+        ["Retention S", num(r.retention_mm, 1) + " mm"],
+        ["Initial abstraction", num(r.initial_abstraction_mm, 1) + " mm"],
+        ["Runoff depth", num(r.runoff_depth_mm, 1) + " mm"],
+        ["Runoff coefficient", num(r.runoff_coefficient * 100, 1) + " %"],
+        ["Annual runoff", num(r.annual_runoff_m3) + " m³"],
+      ]),
+      h("div", { class: "say", text: r.assessment }),
+    ]),
+    h("div", { class: "sec" }, [
+      h("h3", { text: "Storage" }),
+      rows([
+        ["Capacity", num(s.capacity_m3) + " m³"],
+        ["Water surface", num(s.surface_area_m2) + " m²"],
+        ["Usable depth", num(s.usable_depth_m ?? s.max_depth_m, 2) + " m"],
+        ["Fills per year", r.fill_ratio < 0 ? "n/a" : num(r.fill_ratio, 2)],
+      ]),
+      h("details", { class: "more" }, [
+        h("summary", { text: "Stage and storage" }),
+        rows(s.stage_storage.map(([depth, area, volume]) =>
+          [depth.toFixed(2) + " m", `${num(area)} m² · ${num(volume)} m³`])),
+      ]),
+    ]),
+  ];
+}
+
+function dataView() {
+  const body = lastBody, input = body.input, dem = body.dem;
+  const parts = [
+    h("div", { class: "sec" }, [
+      h("h3", { text: "Contour map" }),
+      rows([
+        ["File", input.filename],
+        ["Lines", NUM.format(input.contour_count)],
+        ["Points", NUM.format(input.vertex_count)],
+        ["Elevations from", input.elevation_source.replace(/_/g, " ")],
+        ["Interval", input.interval_m ? input.interval_m + " m" : "not stated"],
+        ["Range", `${input.elevation_range_m[0]} to ${input.elevation_range_m[1]} m`],
+        ["Area mapped", num(input.mapped_area_ha, 1) + " ha"],
+      ]),
+    ]),
+    h("div", { class: "sec" }, [
+      h("h3", { text: "Grid" }),
+      rows([
+        ["Cells", `${dem.shape[0]} × ${dem.shape[1]}`],
+        ["Resolution", `${dem.resolution_m} m (${dem.resolution_source})`],
+        ["Smoothing", dem.smoothing_sigma_m + " m"],
+        ["No data", num(dem.nodata_fraction * 100, 1) + " %"],
+      ]),
+    ]),
+  ];
+  if (body.search) {
+    parts.push(h("div", { class: "sec" }, [
+      h("h3", { text: "Site search" }),
+      rows([
+        ["Stream threshold", num(body.search.stream_threshold_ha, 1) + " ha"],
+        ["Watercourse threshold", num(body.search.trunk_threshold_ha, 1) + " ha"],
+        ["Candidate cells", NUM.format(body.search.candidate_cells)],
+      ]),
+    ]));
+  }
+  parts.push(h("div", { class: "sec" }, [
+    h("h3", { text: "Run" }),
+    rows([["Took", num(body.timing_ms.total / 1000, 1) + " s"]]),
+    h("details", { class: "more" }, [
+      h("summary", { text: "Time per stage" }),
+      rows(Object.entries(body.timing_ms).map(([stage, ms]) => [stage, num(ms) + " ms"])),
+    ]),
+  ]));
+  return parts;
+}
+
+function renderPanel() {
+  if (!lastBody) return;
+  tabsEl.classList.add("on");
+  tabsEl.replaceChildren(...TABS.map(([key, label]) => h("button", {
+    class: key === tab ? "on" : "",
+    text: label,
+    onclick: () => { tab = key; renderPanel(); },
+  })));
+  const content = tab === "water" ? waterView() : tab === "data" ? dataView() : sitesView();
+  resultsEl.replaceChildren(...content);
+  resultsEl.scrollTop = 0;
+}
+
+function renderResults(body, refit) {
+  lastBody = body;
+  features = body.geojson.features || [];
+  lastBBox = body.geojson.bbox || null;
+  buildLegend();
+  renderPanel();
+  if (refit && lastBBox) fitBounds(lastBBox); else render();
+}
+
+// `zoom` is false when the click came from the map. Clicking a shape you can already see
+// and having the view jump is disorienting; clicking a card, where the shape may be off
+// screen, it is the point.
 function selectSite(rank, zoom) {
   if (rank == null) return;
   selectedRank = rank;
-  if (lastBody) renderResults(lastBody, false);
+  if (lastBody) {
+    const scroll = resultsEl.scrollTop;
+    renderPanel();
+    if (!zoom) resultsEl.scrollTop = scroll;
+  }
   if (zoom) {
     const catchment = features.find(
       (f) => f.properties.role === "catchment" && f.properties.rank === rank);
@@ -1618,80 +1646,6 @@ function bboxOf(feature) {
   return [minLon, minLat, maxLon, maxLat];
 }
 
-function renderResults(body, refit) {
-  lastBody = body;
-  const input = body.input, dem = body.dem, site = body.recommended_site;
-  const runoff = site.runoff;
-  resultsEl.replaceChildren();
-
-  const sites = h("div", { class: "block" }, [
-    h("h2", null, [h("span", { class: "step", text: "3" }), "Where the pond goes"]),
-    h("div", { class: "hint", style: "margin:-6px 0 10px",
-               text: "Click a card or a shape on the map to see the ground it covers." }),
-  ]);
-  sites.appendChild(siteCard(site, true));
-  if (body.alternative_sites.length) {
-    sites.appendChild(h("h2", { style: "margin:16px 0 10px" }, ["Other options"]));
-    for (const alternative of body.alternative_sites) {
-      sites.appendChild(siteCard(alternative, false));
-    }
-  }
-  resultsEl.appendChild(sites);
-
-  resultsEl.appendChild(h("div", { class: "block" }, [
-    h("h2", null, ["Rainfall used"]),
-    rows([
-      ["Source", runoff.rainfall_source],
-      ["Yearly rainfall", num(runoff.rainfall_mm) + " mm"],
-      ["Rain days", num(runoff.rain_days)],
-      ["Days that made runoff", num(runoff.contributing_days)],
-      ["Curve number", num(runoff.curve_number, 1)],
-      ["Soil can still take", num(runoff.retention_mm, 1) + " mm"],
-      ["Runs off before soaking in", num(runoff.initial_abstraction_mm, 1) + " mm"],
-    ]),
-  ]));
-
-  const storage = site.storage;
-  resultsEl.appendChild(h("div", { class: "block" }, [
-    h("h2", null, ["The map you gave us"]),
-    rows([
-      ["File", input.filename],
-      ["Contours", `${NUM.format(input.contour_count)} lines, ${NUM.format(input.vertex_count)} points`],
-      ["Heights read from", input.elevation_source.replace(/_/g, " ")],
-      ["Contour interval", input.interval_m ? input.interval_m + " m" : "not stated"],
-      ["Height range", `${input.elevation_range_m[0]} to ${input.elevation_range_m[1]} m`],
-      ["Area mapped", num(input.mapped_area_ha, 1) + " ha"],
-      ["Grid", `${dem.shape[0]} × ${dem.shape[1]} at ${dem.resolution_m} m (${dem.resolution_source})`],
-      ["Smoothing", dem.smoothing_sigma_m + " m"],
-      body.search && ["A stream starts at", num(body.search.stream_threshold_ha, 1) + " ha"],
-      body.search && ["A watercourse starts at", num(body.search.trunk_threshold_ha, 1) + " ha"],
-      body.search && ["Spots considered", NUM.format(body.search.candidate_cells)],
-      ["Took", num(body.timing_ms.total / 1000, 1) + " s"],
-    ]),
-    h("details", { class: "more" }, [
-      h("summary", { text: "How much it holds at each depth" }),
-      rows(storage.stage_storage.map(([depth, area, volume]) =>
-        [depth.toFixed(2) + " m", `${num(area)} m² · ${num(volume)} m³`])),
-    ]),
-    h("details", { class: "more" }, [
-      h("summary", { text: "Time spent on each step" }),
-      rows(Object.entries(body.timing_ms).map(([stage, ms]) => [stage, num(ms) + " ms"])),
-    ]),
-  ]));
-
-  if (body.warnings.length) {
-    resultsEl.appendChild(h("div", { class: "block" }, [
-      h("h2", null, ["Things to know"]),
-      ...noteList(body.warnings, "warn"),
-    ]));
-  }
-
-  features = body.geojson.features || [];
-  lastBBox = body.geojson.bbox || null;
-  buildLegend();
-  if (refit && lastBBox) fitBounds(lastBBox); else render();
-}
-
 function buildLegend() {
   const legend = document.getElementById("legend");
   legend.hidden = !features.length && !contoursDrawn();
@@ -1706,24 +1660,22 @@ function buildLegend() {
   };
 
   if (features.length) {
-    row("The catchment you picked", "#a6cee3", "sw", "solid #1f78b4");
-    row("The other catchments", "#a6cee3", "sw faint", "dashed #4b6b80");
-    row("Water in the pond you picked", "#3182bd", "sw", "solid #08519c");
-    row("Water in the other ponds", "#9ecae1", "sw faint", "solid #3182bd");
-    row("Longest path water takes", null, "sw line", null);
+    row("Selected catchment", "#a6cee3", "sw", "solid #1f78b4");
+    row("Other catchments", "#a6cee3", "sw faint", "dashed #4b6b80");
+    row("Pond at capacity", "#3182bd", "sw", "solid #08519c");
+    row("Longest flow path", null, "sw line", null);
     row("Pond site", "#08519c", "sw dot", null);
   }
 
   if (contoursDrawn()) {
-    // The ramp is the only thing on the map that says which way is uphill, so the
-    // legend has to carry the two numbers that anchor it.
+    // The ramp is the only thing on the map saying which way is uphill, so the legend
+    // carries the two numbers that anchor it.
     const meta = contours.meta;
     const [low, high] = meta.elevation_range_m;
     row(`Contours, ${num(low)} to ${num(high)} m`,
         "linear-gradient(to right, #a8500f, #e08b1e, #ffd166)", "sw", null);
     const detail = meta.interval_m
-      ? `Every ${num(meta.interval_m, 2)} m` +
-        (meta.index_interval_m ? `, heavier every ${num(meta.index_interval_m, 2)} m` : "")
+      ? `Every ${num(meta.interval_m, 2)} m`
       : `${NUM.format(meta.level_count)} levels`;
     legend.appendChild(h("div", { class: "sub", text: detail }));
     if (contourEl.classList.contains("sparse")) {
@@ -1733,11 +1685,14 @@ function buildLegend() {
 }
 
 /* --------------------------------------------------------------------------
- * The request
+ * The file, and the request it goes into
  * ----------------------------------------------------------------------- */
 const fileInput = document.getElementById("file");
-const dropEl = document.getElementById("drop");
+const chipEl = document.getElementById("filechip");
+const chooseButton = document.getElementById("choose");
 const runButton = document.getElementById("run");
+const progEl = document.getElementById("prog");
+const veil = document.getElementById("dropveil");
 let chosen = null;
 
 function size(bytes) {
@@ -1747,31 +1702,69 @@ function size(bytes) {
 function chooseFile(file) {
   chosen = file;
   forgetContours();
+  features = [];
+  lastBody = null;
+  lastBBox = null;
+  autoRain = null;
+  tabsEl.classList.remove("on");
+  showEmpty();
+  buildLegend();
+  render();
+
+  chipEl.hidden = false;
+  chipEl.querySelector(".name").textContent = file.name;
+  chipEl.querySelector(".size").textContent = size(file.size);
+  chooseButton.hidden = true;
+  runButton.disabled = false;
+
+  // The lines are what the reader checks the boundary against, and reading them takes
+  // under a second, so they are drawn without being asked for. Their bbox is also how
+  // the rainfall gets looked up before anything is analysed.
+  contours.on = true;
+  syncContourButton();
+  loadContours().then(() => {
+    if (contours.file === file && contours.meta && contours.meta.bbox) {
+      lookupRainfall(contours.meta.bbox);
+    }
+  });
+  renderDerived();
+}
+
+function clearFile() {
+  chosen = null;
+  forgetContours();
+  features = [];
+  lastBody = null;
+  autoRain = null;
+  chipEl.hidden = true;
+  chooseButton.hidden = false;
+  runButton.disabled = true;
+  tabsEl.classList.remove("on");
+  showEmpty();
+  renderDerived();
   syncContourButton();
   buildLegend();
   render();
-  dropEl.classList.add("ready");
-  dropEl.replaceChildren(
-    h("strong", { text: "Ready to go" }),
-    h("span", { class: "file", text: file.name }),
-    h("div", { class: "hint", text: size(file.size) + ", click to pick another" }),
-  );
-  runButton.disabled = false;
 }
 
-dropEl.onclick = () => fileInput.click();
+chooseButton.onclick = () => fileInput.click();
+document.getElementById("clear-file").onclick = () => clearFile();
 fileInput.onchange = () => { if (fileInput.files[0]) chooseFile(fileInput.files[0]); };
-for (const type of ["dragenter", "dragover"]) {
-  dropEl.addEventListener(type, (event) => { event.preventDefault(); dropEl.classList.add("over"); });
-}
-for (const type of ["dragleave", "drop"]) {
-  dropEl.addEventListener(type, (event) => { event.preventDefault(); dropEl.classList.remove("over"); });
-}
-dropEl.addEventListener("drop", (event) => {
+
+// The map is the drop target, and a file dropped anywhere else must not navigate away.
+let dragDepth = 0;
+mapEl.addEventListener("dragenter", (event) => {
+  event.preventDefault(); dragDepth++; veil.classList.add("on");
+});
+mapEl.addEventListener("dragover", (event) => event.preventDefault());
+mapEl.addEventListener("dragleave", () => { if (--dragDepth <= 0) veil.classList.remove("on"); });
+mapEl.addEventListener("drop", (event) => {
+  event.preventDefault();
+  dragDepth = 0;
+  veil.classList.remove("on");
   const file = event.dataTransfer.files[0];
   if (file) chooseFile(file);
 });
-// A file dropped anywhere but the zone should not navigate the browser away from the app.
 for (const type of ["dragover", "drop"]) {
   document.addEventListener(type, (event) => event.preventDefault());
 }
@@ -1780,6 +1773,15 @@ function optional(form, id, name) {
   const value = document.getElementById(id).value.trim();
   if (value !== "") form.append(name || id, value);
 }
+
+function showEmpty() {
+  resultsEl.replaceChildren(h("div", { class: "empty" }, [
+    h("strong", { text: chosen ? "Ready" : "No contour map yet" }),
+    chosen ? "Press Analyse." : "Choose a .kml or .kmz file, or drop one on the map.",
+  ]));
+}
+
+const ensembleBox = document.getElementById("ensemble");
 
 runButton.onclick = async () => {
   if (!chosen) return;
@@ -1797,23 +1799,18 @@ runButton.onclick = async () => {
   }
 
   runButton.disabled = true;
-  resultsEl.replaceChildren();
+  progEl.classList.add("on");
+  tabsEl.classList.remove("on");
   features = [];
+  lastBody = null;
   buildLegend();
   render();
 
   const started = Date.now();
-  const label = h("span", { text: "Working on it" });
-  statusEl.replaceChildren(
-    h("div", { class: "working" }, [h("div", { class: "spinner" }), label]),
-    h("div", { class: "bar" }, [h("i")]),
-    h("div", { class: "hint", text: ensembleBox.checked
-      ? "Four grids to build, so about ten seconds for a full contour sheet."
-      : "One grid to build, so about four seconds for a full contour sheet." }),
-  );
-  statusEl.classList.add("on");
+  const label = h("span", { text: "Analysing" });
+  resultsEl.replaceChildren(h("div", { class: "working" }, [h("div", { class: "spinner" }), label]));
   const ticker = setInterval(() => {
-    label.textContent = `Working on it, ${((Date.now() - started) / 1000).toFixed(1)} s`;
+    label.textContent = `Analysing, ${((Date.now() - started) / 1000).toFixed(1)} s`;
   }, 100);
 
   try {
@@ -1821,27 +1818,29 @@ runButton.onclick = async () => {
     const body = await response.json();
     clearInterval(ticker);
     if (!response.ok) {
-      statusEl.replaceChildren(
-        h("h2", null, ["That map could not be analysed"]),
+      resultsEl.replaceChildren(h("div", { class: "sec" }, [
+        h("h3", { text: "That map could not be analysed" }),
         h("div", { class: "note bad" }, [
           h("b", { text: body.code || `HTTP ${response.status}` }),
           body.detail || "The request failed.",
         ]),
         body.hint ? h("div", { class: "note info", text: body.hint }) : null,
-      );
+      ]));
       return;
     }
-    statusEl.classList.remove("on");
     selectedRank = 1;
+    tab = "sites";
     renderResults(body, true);
   } catch (error) {
     clearInterval(ticker);
-    statusEl.replaceChildren(
-      h("h2", null, ["The service did not answer"]),
+    resultsEl.replaceChildren(h("div", { class: "sec" }, [
+      h("h3", { text: "The service did not answer" }),
       h("div", { class: "note bad", text: String(error) }),
       h("div", { class: "note info", text: "Is the API running at " + (API || location.origin) + "?" }),
-    );
+    ]));
   } finally {
+    clearInterval(ticker);
+    progEl.classList.remove("on");
     runButton.disabled = false;
   }
 };
@@ -1864,40 +1863,27 @@ runButton.onclick = async () => {
 
 // The cross-check switch follows the host, not the HTML. On a small container
 // `allow_ensemble` is false and an `ensemble=true` run is refused with a 422, so a box
-// ticked in the markup means every upload fails on a page that otherwise looks healthy.
+// ticked in the markup would fail every upload on a page that otherwise looks healthy.
+// Shipping it off and letting /health turn it on means the worst case is an analysis
+// without its error bar, which is the run this host was going to do anyway.
 //
-// So it ships off and /health turns it on, rather than shipping on and being turned off.
-// The difference is what happens in between: a page that starts ticked and is corrected
-// on load has a window where a click sends `ensemble=true` to a host that refuses it, and
-// on a host still waking up that window is seconds long. Starting off, the worst case is
-// an analysis without its error bar, which is the run this host was going to do anyway.
-//
-// Older builds do not report either field; they are read as available and on, which is
-// what they were.
+// Older builds report neither field and are read as available and on, which is what
+// they were.
 function applyEnsembleCapability(body) {
   if (body.ensemble_available === false) {
     ensembleBox.disabled = true;
-    ensembleHint.textContent =
-      "Not available on this host: the three-grid cross-check needs more memory than "
-      + "this container has. The analysis is otherwise unchanged, but the catchment area "
-      + "comes back without its error bar and confidence reads unassessed.";
+    document.getElementById("ensemble-note").textContent =
+      "Not available on this host: three grids need more memory than this container has. "
+      + "The area comes back without an error bar and confidence reads unassessed.";
     return;
   }
   ensembleBox.checked = body.ensemble_default !== false;
 }
 
-resultsEl.appendChild(h("div", { class: "block" }, [
-  h("div", { class: "empty" }, [
-    "Drop a contour map above and press Analyse.",
-    h("br"),
-    "The catchment, the pond site and a year of runoff come back on the map.",
-  ]),
-]));
-
-// Central India, where the sample sheet is, so the page opens on ground rather than on an
-// ocean while it waits for a file.
+showEmpty();
+// Central India, where the sample sheet is, so the page opens on ground rather than on
+// an ocean while it waits for a file.
 fitBounds([78.0, 19.0, 84.0, 24.0]);
-updateRainButton();
 syncContourButton();
 </script>
 </body>
