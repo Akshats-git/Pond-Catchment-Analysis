@@ -40,10 +40,11 @@ analysis of the same sheet is queued or running.
 from __future__ import annotations
 
 import asyncio
+import math
 import weakref
 
 import anyio
-from fastapi import APIRouter, File, Form, Query, UploadFile, status
+from fastapi import APIRouter, File, Form, Query, Response, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from pydantic import ValidationError
 
@@ -53,6 +54,7 @@ from app.core.geojson import GeoJSONError, contour_drawing
 from app.core.hydrology import HydrologyError
 from app.core.kml_parser import ContourParseError, parse_contours
 from app.core.pond_siting import SitingError
+from app.core.render import RenderError, render_png
 from app.errors import APIError
 from app.pipeline import AnalysisError, Stopwatch, analyse
 from app.providers.rainfall import rainfall_for
@@ -147,6 +149,10 @@ _STATUS_BY_CODE: dict[str, int] = {
     "no_site_found": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "ensemble_unavailable": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "invalid_simplify": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "invalid_image_size": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "invalid_basemap": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "invalid_frame": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "render_too_large": status.HTTP_422_UNPROCESSABLE_ENTITY,
 }
 """Codes that are not 400. Everything else the core raises is a file that cannot be
 analysed, which is what 400 means here."""
@@ -157,6 +163,7 @@ _ANALYSIS_ERRORS = (
     SitingError,
     HydrologyError,
     GeoJSONError,
+    RenderError,
     AnalysisError,
 )
 """Every structured error the pipeline can raise. They share the `(code, detail, hint)`
@@ -227,6 +234,25 @@ def _params(raw: dict) -> AnalysisParams:
             problems,
             "See /docs for each parameter's accepted range.",
         ) from exc
+
+
+def _span_metres(bbox) -> float:
+    """Rough east-west ground width of a bbox, for choosing a simplification budget.
+
+    Rough is the whole requirement: it decides how finely to thin contour lines for a
+    raster, where being out by a few percent moves a vertex by a fraction of a pixel.
+    """
+    min_lon, min_lat, max_lon, max_lat = bbox
+    mid_lat = math.radians((min_lat + max_lat) / 2.0)
+    return abs(max_lon - min_lon) * 111_320.0 * math.cos(mid_lat)
+
+
+def _image_name(filename: str) -> str:
+    """`contours_1m.kml` -> `contours_1m-catchment.png`, with anything a header cannot
+    carry stripped out."""
+    stem = filename.rsplit("/", 1)[-1].rsplit(".", 1)[0] or "contour-map"
+    safe = "".join(c if c.isalnum() or c in "-_" else "-" for c in stem)[:60]
+    return f"{safe.strip('-') or 'contour-map'}-catchment.png"
 
 
 def _extension_warning(filename: str) -> str | None:
@@ -435,6 +461,231 @@ async def contours(
     if extension is not None:
         response.warnings.insert(0, extension)
     return response
+
+
+_RENDER_RESPONSES: dict[int | str, dict] = {
+    200: {
+        "content": {"image/png": {}},
+        "description": "The rendered map.",
+    },
+    400: {"model": ErrorResponse, "description": "The file cannot be analysed."},
+    413: {"model": ErrorResponse, "description": "Upload or sheet too large."},
+    422: {"model": ErrorResponse, "description": "Parameters, size or basemap unusable."},
+    504: {"model": ErrorResponse, "description": "The analysis exceeded the time limit."},
+}
+
+WARNINGS_HEADER = "X-Pond-Warnings"
+"""Where a PNG response puts what a JSON one would have put in `warnings`.
+
+A picture has nowhere to carry a caveat, and silently dropping "the rainfall is a
+climatology, not an observation" because the client asked for an image would be the
+service choosing what the client is allowed to know. Header values are single-line
+latin-1, so the list is joined and truncated; the full set is always available by asking
+`/analyzeContour` for the same file."""
+
+_HEADER_LIMIT = 900
+"""Servers commonly cap a single header near 4 kB after the field name and CRLF. Well
+under it, because this is a signpost to the JSON endpoint and not a payload."""
+
+
+def _warning_header(warnings: list[str]) -> dict[str, str]:
+    """The warnings as one header-safe line, or no header when there are none."""
+    if not warnings:
+        return {}
+    joined = " | ".join(w.replace("\n", " ").strip() for w in warnings)
+    # Non-latin-1 characters cannot go in a header at all, and a warning is not worth an
+    # encoding error. The replacement marks that something was dropped.
+    safe = joined.encode("latin-1", "replace").decode("latin-1")
+    if len(safe) > _HEADER_LIMIT:
+        safe = safe[: _HEADER_LIMIT - 3] + "..."
+    return {WARNINGS_HEADER: safe}
+
+
+def _legend_rows(result) -> tuple[str, list[tuple[str, str]]]:
+    """The recommended site's headline numbers, so the image answers without the JSON."""
+    site = result.recommended
+    balance = result.recommended_balance
+    catchment = site.catchment
+    storage = balance.storage
+
+    area = f"{catchment.area_ha:,.1f} ha"
+    if site.ensemble is not None:
+        area = f"{catchment.area_ha:,.1f} +/- {site.ensemble.std_area_ha:,.1f} ha"
+
+    runoff = balance.runoff
+    ratio = balance.fill_ratio
+    rows = [
+        ("Catchment", area),
+        (
+            f"Storage at {result.params.target_depth_m:g} m",
+            f"{storage.usable_capacity_m3:,.0f} m3",
+        ),
+        ("Annual runoff", f"{balance.annual_runoff_m3:,.0f} m3"),
+        # The single most decision-relevant number on the page: under 1 the pond does not
+        # fill in an average year, well over it the spillway is the design problem.
+        ("Fill ratio", "no capacity" if ratio == float("inf") else f"{ratio:,.2f}x"),
+        ("Rainfall", f"{runoff.rainfall_mm:,.0f} mm / {runoff.rain_days} days"),
+    ]
+    return f"Site 1 of {len(result.sites)}, recommended", rows
+
+
+@router.post(
+    "/renderMap",
+    responses=_RENDER_RESPONSES,
+    response_class=Response,
+    summary="The same analysis, drawn as a PNG map",
+)
+async def render_map(
+    contour_map: UploadFile | None = File(
+        None, description="Contour map as .kml or .kmz. The same file /analyzeContour takes."
+    ),
+    file: UploadFile | None = File(None, include_in_schema=False),
+    grid_resolution: float | None = Form(None, description="Grid cell size in metres."),
+    top_n: int | None = Form(None, description="How many basins to draw."),
+    lat: float | None = Form(None, description="Latitude of a spot you have chosen yourself."),
+    lon: float | None = Form(None, description="Longitude of that spot. Send it with lat."),
+    curve_number: float | None = Form(None, description="SCS curve number, 30 to 98."),
+    rainfall_mm: float | None = Form(None, description="Yearly rainfall in millimetres."),
+    rain_days: int | None = Form(None, description="Days a year that rain falls on."),
+    target_depth_m: float | None = Form(None, description="Pond depth in metres."),
+    ensemble: bool | None = Form(None, description="Cross-check each site on three grids."),
+    width: int | None = Form(None, description="Image width in pixels."),
+    height: int | None = Form(None, description="Image height in pixels."),
+    basemap: str | None = Form(
+        None,
+        description="satellite, street, hillshade or none. `hillshade` draws the DEM the "
+        "analysis ran on and needs no network.",
+    ),
+    contours: bool = Form(
+        True, description="Draw the uploaded contour lines under the answer."
+    ),
+    frame: str | None = Form(
+        None, description="`sheet` for the whole uploaded map, `sites` to zoom to the answer."
+    ),
+    legend: bool = Form(True, description="Draw the recommended site's numbers on the image."),
+) -> Response:
+    """The answer as a picture: the catchment, the pond and the ranked sites, drawn over
+    satellite imagery and the contour lines they were derived from.
+
+    Same input as `/analyzeContour`, same analysis, same colours. What comes back is a
+    PNG instead of JSON, for a reader who has no map client in front of them. The one
+    check that matters is visual and no number can make it: a catchment boundary is right
+    when it runs along the ridges, and that is legible at a glance with the contours
+    underneath and invisible without them.
+
+    The basemap is allowed to fail. If the tile server cannot be reached the image falls
+    back to a hillshade of the uploaded sheet, which needs no network, and says so in the
+    `X-Pond-Warnings` header. Every warning the JSON response would have carried is in
+    that header, since a PNG has nowhere else to put one.
+
+    Costs a full analysis, so it is as slow as `/analyzeContour` and shares the same
+    one-at-a-time queue. Ask for the JSON if you want both; the GeoJSON in it draws the
+    same map client-side.
+    """
+    upload = _resolve_upload(contour_map, file)
+    params = _params(
+        {
+            "grid_resolution": grid_resolution,
+            "top_n": top_n,
+            "lat": lat,
+            "lon": lon,
+            "curve_number": curve_number,
+            "rainfall_mm": rainfall_mm,
+            "rain_days": rain_days,
+            "target_depth_m": target_depth_m,
+            "ensemble": ensemble,
+        }
+    )
+    if params.ensemble and not settings.api.allow_ensemble:
+        raise APIError(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "ensemble_unavailable",
+            "This host does not have the memory to run the resolution ensemble.",
+            "Send ensemble=false, or omit it. The map is unchanged except that the "
+            "catchment area is drawn without its error bar.",
+        )
+    wanted_frame = (frame or "sheet").lower()
+    if wanted_frame not in ("sheet", "sites"):
+        raise APIError(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "invalid_frame",
+            f"frame is {wanted_frame!r}; it has to be `sheet` or `sites`.",
+            "`sheet` frames the whole uploaded map, `sites` zooms to the catchments.",
+        )
+
+    filename = upload.filename or "upload.kml"
+    data = await _read_upload(upload)
+
+    def work() -> tuple[bytes, list[str]]:
+        result = analyse(data, filename, params)
+        warnings = list(result.warnings)
+
+        analysis_bbox = tuple(result.geojson["bbox"])
+        sheet_bbox = tuple(result.contours.metadata.bbox)
+        bbox = sheet_bbox if wanted_frame == "sheet" else analysis_bbox
+
+        drawing = None
+        if contours:
+            # Thinned to the picture rather than to the analysis: a vertex that moves
+                # by less than half a pixel cannot change what is drawn, and at a 1200 px
+                # width over a 3 km sheet that budget is metres rather than the 1.5 m the
+                # vector endpoint spends. Same lines, a fraction of the rasterising.
+                span_m = _span_metres(bbox)
+                tolerance = max(
+                    settings.geojson.contour_simplify_tolerance_m,
+                    span_m / max(width or settings.render.default_width, 1) * 0.5,
+                )
+                drawing = contour_drawing(result.contours, tolerance_m=tolerance)
+                warnings.extend(drawing.warnings)
+
+        title, rows = _legend_rows(result)
+        png, render_warnings = render_png(
+            analysis=result.geojson,
+            dem=result.dem,
+            contours=drawing.geojson if drawing is not None else None,
+            legend_rows=rows if legend else None,
+            legend_title=title,
+            width=width,
+            height=height,
+            basemap=basemap,
+            frame_bbox=bbox,
+        )
+        warnings.extend(render_warnings)
+        return png, warnings
+
+    try:
+        with anyio.fail_after(settings.api.request_timeout_s):
+            async with _analysis_limiter():
+                png, warnings = await run_in_threadpool(work)
+    except TimeoutError as exc:
+        raise APIError(
+            status.HTTP_504_GATEWAY_TIMEOUT,
+            "analysis_timeout",
+            f"The analysis did not finish within {settings.api.request_timeout_s:.0f} s.",
+            "Request a coarser grid_resolution, set ensemble=false, or ask for a smaller "
+            "image. If several requests were sent at once they run one at a time.",
+        ) from exc
+    except _ANALYSIS_ERRORS as exc:
+        raise APIError(
+            _STATUS_BY_CODE.get(exc.code, status.HTTP_400_BAD_REQUEST),
+            exc.code,
+            exc.detail,
+            exc.hint,
+        ) from exc
+
+    extension = _extension_warning(filename)
+    if extension is not None:
+        warnings.insert(0, extension)
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={
+            # Named so a browser "save image as" lands on something recognisable rather
+            # than on `renderMap`.
+            "Content-Disposition": f'inline; filename="{_image_name(filename)}"',
+            **_warning_header(warnings),
+        },
+    )
 
 
 @router.get(

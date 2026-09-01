@@ -21,6 +21,7 @@ sites of about half the analytic area. The pair sums to the whole valley, which 
 
 from __future__ import annotations
 
+import io
 import os
 from dataclasses import replace
 
@@ -32,6 +33,7 @@ from app import main
 from app.config import settings
 from app.main import app
 from app.routers import analyze as analyze_module
+from app.core import render as render_module
 from app.routers.analyze import UPLOAD_FIELD, UPLOAD_FIELD_ALIAS
 from tests.fixtures import make_variants as variants
 from tests.fixtures.make_synthetic import VALLEY
@@ -40,6 +42,7 @@ SAMPLE = "data/contours_1m.kml"
 ENDPOINT = f"{settings.api.api_prefix}/analyzeContour"
 ALIAS = f"{settings.api.api_prefix}/findCatchment"
 CONTOURS = f"{settings.api.api_prefix}/contours"
+RENDER = f"{settings.api.api_prefix}/renderMap"
 
 VALLEY_KML = VALLEY.to_kml()
 
@@ -787,3 +790,244 @@ def test_the_demo_page_can_turn_the_contours_on(client: TestClient) -> None:
     page = client.get("/static/index.html").text
     assert 'id="contour-toggle"' in page
     assert '/api/v1/contours' in page
+
+
+# --------------------------------------------------------------------------- #
+# The rendered map
+#
+# `/renderMap` is the same analysis with a PNG on the end of it, and everything worth
+# testing here is a consequence of that: the picture has to be of the answer, it has to
+# carry the caveats the JSON would have carried, and it must not fail because somebody
+# else's tile server did.
+#
+# Every test below asks for a basemap that needs no network. The fallback path is the one
+# place a fetch is simulated, and it is simulated rather than performed: a suite that
+# reaches the internet fails in a lab with no route out, which is exactly where this
+# service is deployed.
+# --------------------------------------------------------------------------- #
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+def render(client: TestClient, payload: bytes = VALLEY_KML, **form):
+    form.setdefault("ensemble", False)
+    form.setdefault("basemap", "hillshade")
+    return post(client, payload, url=RENDER, **form)
+
+
+def test_the_map_comes_back_as_a_png(client: TestClient) -> None:
+    response = render(client)
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "image/png"
+    assert response.content.startswith(PNG_MAGIC)
+    assert "valley-catchment.png" in response.headers["content-disposition"]
+
+
+def test_the_image_is_the_size_that_was_asked_for(client: TestClient) -> None:
+    from PIL import Image
+
+    response = render(client, width=640, height=480)
+    with Image.open(io.BytesIO(response.content)) as image:
+        assert image.size == (640, 480)
+
+
+def test_the_default_size_is_the_configured_one(client: TestClient) -> None:
+    from PIL import Image
+
+    with Image.open(io.BytesIO(render(client).content)) as image:
+        assert image.size == (settings.render.default_width, settings.render.default_height)
+
+
+def test_a_png_carries_the_warnings_a_json_response_would_have(client: TestClient) -> None:
+    """The one thing an image cannot do is carry a caveat, and dropping "this rainfall is
+    a climatology, not an observation" because the client asked for a picture would be the
+    service deciding what the client is allowed to know."""
+    analysed = post(client, VALLEY_KML, ensemble=False).json()
+    header = render(client).headers.get(analyze_module.WARNINGS_HEADER, "")
+
+    assert analysed["warnings"], "the valley should warn about something"
+    for warning in analysed["warnings"]:
+        assert warning[:40] in header
+
+
+def test_the_warning_header_stays_inside_what_a_header_can_hold(client: TestClient) -> None:
+    """Header values are single-line latin-1 and servers cap their length. A warning list
+    that grew past either would take the whole response down with it."""
+    monstrous = ["x" * 400, "a caveat with a — dash in it", "another\nline"] * 6
+    header = analyze_module._warning_header(monstrous)[analyze_module.WARNINGS_HEADER]
+
+    assert len(header) <= analyze_module._HEADER_LIMIT
+    assert "\n" not in header
+    header.encode("latin-1")  # raises if anything survived that cannot be sent
+
+
+def test_no_warnings_means_no_header(client: TestClient) -> None:
+    assert analyze_module._warning_header([]) == {}
+
+
+def test_the_picture_is_of_the_same_analysis_as_the_json(client: TestClient) -> None:
+    """Two endpoints, one pipeline. If the render ran its own analysis with its own
+    defaults the image could show a different answer from the numbers beside it, and a
+    reader has no way to notice."""
+    body = post(client, VALLEY_KML, ensemble=False, top_n=2).json()
+    response = render(client, top_n=2)
+
+    assert response.status_code == 200
+    assert len(sites_of(body)) == 2
+    # Same parameters reach the pipeline, so the same warnings come out of it.
+    assert body["warnings"][0][:40] in response.headers[analyze_module.WARNINGS_HEADER]
+
+
+def test_a_render_refuses_a_size_it_cannot_afford(client: TestClient) -> None:
+    """The overlay is drawn supersampled in RGBA, so the pixel count is a memory bound
+    and not a matter of taste."""
+    too_big = render(client, width=settings.render.max_size_px + 1)
+    too_small = render(client, height=settings.render.min_size_px - 1)
+
+    for response in (too_big, too_small):
+        assert response.status_code == 422
+        assert response.json()["code"] == "invalid_image_size"
+        assert "hint" in response.json()
+
+
+def test_an_unknown_basemap_names_the_ones_that_exist(client: TestClient) -> None:
+    body = render(client, basemap="moon").json()
+
+    assert body["code"] == "invalid_basemap"
+    for name in settings.render.basemaps:
+        assert name in body["detail"] or name in body["hint"]
+
+
+def test_an_unknown_frame_is_refused(client: TestClient) -> None:
+    body = render(client, frame="galaxy").json()
+    assert body["code"] == "invalid_frame"
+
+
+def test_the_render_rejects_what_the_analysis_rejects(client: TestClient) -> None:
+    """One error table, one envelope. A bad curve number is a bad curve number whether
+    the client wanted JSON or a picture."""
+    body = render(client, curve_number=200).json()
+
+    assert body["status"] == "error"
+    assert body["code"] == "invalid_parameters"
+
+
+def test_a_missing_file_names_both_accepted_fields(client: TestClient) -> None:
+    response = client.post(RENDER, data={"basemap": "hillshade"})
+    body = response.json()
+
+    assert response.status_code == 422
+    assert body["code"] == "missing_file"
+    assert UPLOAD_FIELD in body["detail"] and UPLOAD_FIELD_ALIAS in body["hint"]
+
+
+def test_the_hillshade_needs_no_network_at_all(client: TestClient, monkeypatch) -> None:
+    """The reason it is the fallback. This test fails loudly if any code path under
+    `basemap=hillshade` ever grows a fetch."""
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("the hillshade basemap reached for the network")
+
+    monkeypatch.setattr(render_module.urllib.request, "urlopen", forbidden)
+    assert render(client).status_code == 200
+
+
+def test_a_tile_server_that_is_down_degrades_to_the_hillshade(
+    client: TestClient, monkeypatch
+) -> None:
+    """Somebody else's outage must not become this service's. A 502 here would be the
+    render refusing to draw a catchment it had already computed."""
+    monkeypatch.setattr(render_module, "_TILE_CACHE", type(render_module._TILE_CACHE)())
+
+    def unreachable(*args, **kwargs):
+        raise OSError("no route to host")
+
+    monkeypatch.setattr(render_module.urllib.request, "urlopen", unreachable)
+    response = render(client, basemap="satellite")
+
+    assert response.status_code == 200
+    assert response.content.startswith(PNG_MAGIC)
+    assert "hillshade" in response.headers[analyze_module.WARNINGS_HEADER]
+
+
+def test_a_failed_tile_is_not_asked_for_twice(monkeypatch) -> None:
+    """A tile that 404s at this zoom will 404 on every retry, and re-asking a provider
+    that is rate-limiting you is how a service gets itself blocked for good."""
+    monkeypatch.setattr(render_module, "_TILE_CACHE", type(render_module._TILE_CACHE)())
+    calls = []
+
+    def unreachable(*args, **kwargs):
+        calls.append(1)
+        raise OSError("nope")
+
+    monkeypatch.setattr(render_module.urllib.request, "urlopen", unreachable)
+    for _ in range(3):
+        render_module._tile_bytes("https://example.invalid/1/2/3", ("sat", 1, 2, 3), settings.render)
+    assert len(calls) == 1
+
+
+def test_the_view_fills_the_frame_it_was_given() -> None:
+    """An integer-zoom fit leaves up to half the canvas empty whenever the extent falls
+    just past a power of two. The drawn extent should touch the padding on one axis."""
+    bbox = (81.28, 21.24, 81.31, 21.26)
+    view = render_module.fit_view(bbox, 1200, 900, cfg=settings.render)
+
+    x0, y0 = view.to_px(bbox[0], bbox[3])
+    x1, y1 = view.to_px(bbox[2], bbox[1])
+    used_w = float(x1 - x0) / (1200 - 2 * settings.render.padding_px)
+    used_h = float(y1 - y0) / (900 - 2 * settings.render.padding_px)
+
+    assert max(used_w, used_h) == pytest.approx(1.0, abs=0.01)
+    assert view.tile_zoom >= view.zoom  # never stretched, only downsampled
+
+
+def test_dense_contours_thin_to_index_lines_and_say_so(client: TestClient) -> None:
+    """One-pixel lines six pixels apart stop reading as lines and become a haze over the
+    imagery, hiding the ground the contours were drawn to let the reader check. A printed
+    sheet drops to every fifth line for the same reason, and a reader counting intervals
+    off the picture has to be told the interval changed."""
+    small = render(client, width=settings.render.min_size_px, height=settings.render.min_size_px)
+    header = small.headers.get(analyze_module.WARNINGS_HEADER, "")
+
+    assert small.status_code == 200
+    assert "contour lines fall" in header
+
+
+def test_the_contours_can_be_left_off(client: TestClient) -> None:
+    bare = render(client, contours=False)
+    drawn = render(client, contours=True)
+
+    assert bare.status_code == drawn.status_code == 200
+    # Fewer strokes is less entropy, so a PNG of the same map without them is smaller.
+    assert len(bare.content) < len(drawn.content)
+
+
+def test_openapi_documents_the_render_endpoint(client: TestClient) -> None:
+    schema = client.get("/openapi.json").json()
+    operation = schema["paths"][RENDER]["post"]
+
+    assert "image/png" in operation["responses"]["200"]["content"]
+    assert {"400", "413", "422", "504"} <= set(operation["responses"])
+    ref = operation["requestBody"]["content"]["multipart/form-data"]["schema"]["$ref"]
+    body = schema["components"]["schemas"][ref.rsplit("/", 1)[-1]]
+    # The alias is accepted and undocumented here for the same reason it is on the other
+    # two endpoints: /docs should offer one file picker, under the name the brief fixes.
+    assert UPLOAD_FIELD in body["properties"]
+    assert UPLOAD_FIELD_ALIAS not in body["properties"]
+    assert {"basemap", "contours", "frame", "width", "height"} <= set(body["properties"])
+
+
+def test_the_sample_sheet_renders(client: TestClient) -> None:
+    """The real file at the real default size, which is the one that has to work in front
+    of a grader. Hillshade, so the test does not depend on a tile server."""
+    from PIL import Image
+
+    if not os.path.exists(SAMPLE):
+        pytest.skip(f"{SAMPLE} is not present")
+    with open(SAMPLE, "rb") as handle:
+        response = render(client, handle.read(), name="contours_1m.kml")
+
+    assert response.status_code == 200, response.text
+    with Image.open(io.BytesIO(response.content)) as image:
+        assert image.size == (settings.render.default_width, settings.render.default_height)
+        assert image.mode == "RGB"

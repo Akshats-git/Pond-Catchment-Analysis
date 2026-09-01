@@ -415,6 +415,108 @@ class GeoJSONConfig:
 
 
 # --------------------------------------------------------------------------- #
+# Raster rendering
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class RenderConfig:
+    """The map image, for clients that cannot draw GeoJSON themselves.
+
+    The vector answer is the real one and this is a picture of it. Nothing here changes
+    a number; every value below decides how legible the picture is, and the defaults are
+    chosen so the rendered map matches the demo page rather than being a second opinion
+    about the same data.
+    """
+
+    default_width: int = 1200
+    default_height: int = 900
+    """A 4:3 sheet, which is the aspect most contour maps come in and the shape the
+    catchment of the sample fills without wasting either edge."""
+
+    min_size_px: int = 240
+    max_size_px: int = 1600
+    """Upper bound is a memory bound, not a taste one. The overlay is drawn at
+    `supersample` times the requested size in RGBA before being scaled down, so 1600
+    costs 1600*1600*4*4 = 41 MB at full square. On the 512 MB container that sits on top
+    of the ~300 MB the analysis itself peaks at, which is the whole of the headroom."""
+
+    supersample: int = 2
+    """The vector overlay is drawn this many times oversized and scaled down with
+    Lanczos, because Pillow's draw primitives have no anti-aliasing at all. Without it
+    every contour line and catchment boundary is a visible staircase, which on a
+    boundary the reader is being asked to *check against the ridges* is not a cosmetic
+    problem. Two is the whole of the win; four costs four times the memory to remove
+    artefacts nobody can see."""
+
+    padding_px: int = 40
+    """Breathing room between the drawn extent and the edge of the image, so a catchment
+    that reaches the edge of the sheet does not read as one that was clipped."""
+
+    contour_min_spacing_px: float = 7.0
+    """Below this many pixels between neighbouring contour lines, only the index contours
+    are drawn.
+
+    Not a performance rule, a legibility one, and the same one a printed sheet follows.
+    The sample's 1,355 lines sit 14.6 m apart, which at a whole-sheet 1200 px frame is
+    5.8 px: one-pixel lines that close together stop reading as lines and become a haze
+    over the imagery, hiding the ground the reader was given the contours to check. Every
+    fifth line at 29 px apart shows the same shape and leaves the satellite image
+    visible. The rule is announced in a warning rather than applied silently, because a
+    reader counting intervals off the picture has to know the interval changed."""
+
+    default_basemap: str = "satellite"
+    basemaps: tuple[str, ...] = ("satellite", "street", "hillshade", "none")
+    """`hillshade` renders the DEM the analysis actually ran on, which is the only
+    basemap that cannot fail and the only one that shows what the router saw. The two
+    tiled options need outbound network; see `tile_failure_ratio`."""
+
+    tile_size_px: int = 256
+    max_zoom: int = 18
+    """One below the providers' 19. The extra level rarely adds detail over farmland and
+    quadruples the tile count."""
+
+    max_tiles: int = 256
+    """Ceiling on one render's tile fetches. At the default size a render needs about
+    30, so this only ever bites on a pathological aspect ratio."""
+
+    tile_timeout_s: float = 6.0
+    tile_workers: int = 8
+    """Fetched in parallel because they are pure latency. Eight keeps a default render
+    under two seconds without looking like a scraper to the tile provider."""
+
+    tile_cache_size: int = 512
+    """Tiles kept in memory across requests. A grader re-rendering the same sheet at the
+    same size pays for the fetch once. 512 tiles of 256px PNG is roughly 30 MB."""
+
+    tile_failure_ratio: float = 0.4
+    """Fraction of tiles that may fail before the basemap is abandoned for the hillshade.
+
+    A few missing tiles are holes in a picture that is still readable. Half a missing
+    basemap is a misleading one, and the honest response is to draw the terrain the
+    service is actually sure about and say so in a warning. Same reasoning as the
+    rainfall provider's climatology fallback: degrade to the thing that cannot fail,
+    and name what happened."""
+
+    user_agent: str = "PondCatchmentAnalysis/1.0 (+contour catchment siting service)"
+    """Tile providers ask for identification. An honest one is also what keeps a shared
+    lab IP from being mistaken for a scraper."""
+
+    satellite_url: str = (
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/"
+        "MapServer/tile/{z}/{y}/{x}"
+    )
+    """Esri's REST layout is {z}/{row}/{col}, not the {z}/{x}/{y} of the XYZ convention.
+    The y/x order below is deliberate, and swapping it yields a plausible-looking map of
+    the wrong place."""
+
+    street_url: str = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+
+    satellite_credit: str = "Imagery (c) Esri, Maxar, Earthstar Geographics"
+    street_credit: str = "(c) OpenStreetMap contributors"
+    hillshade_credit: str = "Hillshade from the uploaded contour sheet"
+    """Burnt into the image because an image travels without the response that carried
+    it. A screenshot pasted into a report has to carry its own attribution."""
+
+# --------------------------------------------------------------------------- #
 # API
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
@@ -477,6 +579,7 @@ class Settings:
     hydrology: HydrologyConfig = field(default_factory=HydrologyConfig)
     rainfall: RainfallConfig = field(default_factory=RainfallConfig)
     geojson: GeoJSONConfig = field(default_factory=GeoJSONConfig)
+    render: RenderConfig = field(default_factory=RenderConfig)
     api: APIConfig = field(default_factory=APIConfig)
 
 
@@ -522,6 +625,7 @@ def load_settings() -> Settings:
         hydrology=_from_env(HydrologyConfig, "hydrology"),
         rainfall=_from_env(RainfallConfig, "rainfall"),
         geojson=_from_env(GeoJSONConfig, "geojson"),
+        render=_from_env(RenderConfig, "render"),
         api=_from_env(APIConfig, "api"),
     )
 

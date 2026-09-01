@@ -4,12 +4,14 @@ Base URL of the running service: **`http://10.1.75.53:5229`**
 Interactive documentation, generated from the same models that serialise the responses:
 **`http://10.1.75.53:5229/docs`**
 
-Four endpoints, plus an alias. Everything is `multipart/form-data` in and JSON out.
+Five endpoints, plus an alias. Everything is `multipart/form-data` in, and JSON out
+except `/renderMap`, which returns a PNG.
 
 | Method | Path | What it does |
 |---|---|---|
 | `POST` | `/api/v1/analyzeContour` | Contour map in, pond site + catchment + yield out |
 | `POST` | `/api/v1/findCatchment` | Alias of the above, identical signature |
+| `POST` | `/api/v1/renderMap` | The same analysis, drawn as a PNG map |
 | `POST` | `/api/v1/contours` | The same map back as drawable lines, without analysing it |
 | `GET` | `/api/v1/rainfall` | Ten years of daily rainfall for one point |
 | `GET` | `/health` | Liveness. Does no work on purpose |
@@ -128,6 +130,92 @@ curl -sF contour_map=@data/contours_1m.kml \
      http://10.1.75.53:5229/api/v1/analyzeContour \
   | python3 -c 'import json,sys; s=json.load(sys.stdin)["recommended_site"]; \
 print(s["location"], s["catchment"]["area_ha"], "ha", s["runoff"]["annual_runoff_m3"], "m3/yr")'
+```
+
+---
+
+## POST /api/v1/renderMap
+
+The answer as a picture: the catchment, the pond and the ranked sites drawn over
+satellite imagery and the contour lines they were derived from. Same input as
+`/analyzeContour`, same analysis, same colours. What comes back is `image/png`.
+
+It exists for the check that no number can make. A catchment boundary is right when it
+runs along the ridges, and that is legible at a glance with the contours underneath it
+and invisible without them. `/analyzeContour` hands back the GeoJSON to draw that
+yourself; this draws it for a reader who has no map client in front of them, and for a
+report that needs a figure.
+
+Costs a full analysis, so it is as slow as `/analyzeContour` (several seconds on the
+sample sheet) and shares the same one-at-a-time queue.
+
+### Request
+
+Every field `/analyzeContour` takes, plus six that decide what the picture looks like.
+
+| Field | Type | Required | Default | Notes |
+|---|---|---|---|---|
+| `contour_map` | file | yes | — | `.kml` or `.kmz` |
+| `grid_resolution`, `top_n`, `lat`, `lon`, `curve_number`, `rainfall_mm`, `rain_days`, `target_depth_m`, `ensemble` | | no | | Exactly as `/analyzeContour`; same ranges, same errors |
+| `width` | int | no | `1200` | 240 to 1600 |
+| `height` | int | no | `900` | 240 to 1600 |
+| `basemap` | string | no | `satellite` | `satellite`, `street`, `hillshade` or `none` |
+| `contours` | bool | no | `true` | Draw the uploaded contour lines under the answer |
+| `frame` | string | no | `sheet` | `sheet` for the whole uploaded map, `sites` to zoom to the answer |
+| `legend` | bool | no | `true` | Draw the recommended site's numbers on the image |
+
+`width` and `height` are capped because the vector overlay is drawn supersampled in RGBA
+before being scaled down: the pixel count is a memory bound, not a matter of taste.
+
+### Response, 200
+
+`image/png`, at exactly the size asked for, with
+
+```
+Content-Type: image/png
+Content-Disposition: inline; filename="contours_1m-catchment.png"
+X-Pond-Warnings: Open-Meteo returned HTTP 429. The documented regional climatology ...
+```
+
+**Read the `X-Pond-Warnings` header.** A picture has nowhere to carry a caveat, and
+dropping "this rainfall is a climatology, not an observation" because the client asked for
+an image would be the service deciding what the client is allowed to know. Every warning
+the JSON response would have carried is in that header, joined with ` | `, truncated at
+900 characters. Ask `/analyzeContour` for the same file to see the full list.
+
+What is drawn, in this order: the contour lines, each catchment as a translucent blue
+polygon, each pond as the water surface at the stage the site holds, the recommended
+site's longest flow path in red, a numbered marker per site, the recommended catchment's
+area on a pill, the legend, a scale bar and the basemap's attribution.
+
+Two things adapt to the image rather than being fixed:
+
+* **Contour density.** Below seven pixels between neighbouring lines only the index
+  contours are drawn, and the warning header says so and names the new interval. One-pixel
+  lines closer than that stop reading as lines and become a haze over the imagery, hiding
+  the ground the contours were there to let you check. A printed sheet drops to every
+  fifth line for the same reason.
+* **The basemap.** If the tile server cannot be reached, or more than 40% of tiles fail,
+  the image falls back to a hillshade of the uploaded sheet and says so in the header.
+  Somebody else's outage should not become a 502 on a catchment this service had already
+  computed. `basemap=hillshade` asks for that directly and needs no network at all.
+
+### curl
+
+```bash
+# The default picture: satellite, contours, legend, whole sheet.
+curl -X POST -F "contour_map=@data/contours_1m.kml" -F "ensemble=false" \
+     http://10.1.75.53:5229/api/v1/renderMap -o catchment.png
+
+# Zoomed to the answer, no imagery, larger.
+curl -X POST -F "contour_map=@data/contours_1m.kml" -F "ensemble=false" \
+     -F "frame=sites" -F "basemap=hillshade" -F "width=1600" -F "height=1200" \
+     http://10.1.75.53:5229/api/v1/renderMap -o catchment.png
+
+# The picture and the caveats that go with it.
+curl -sD - -o catchment.png -X POST -F "contour_map=@data/contours_1m.kml" \
+     -F "ensemble=false" http://10.1.75.53:5229/api/v1/renderMap \
+  | grep -i x-pond-warnings
 ```
 
 ---
@@ -333,6 +421,11 @@ file has to change.
 | `no_available_ground` | An `exclusion_mask` ruled out every site the terrain allows. Library callers only; see [REPORT.md §8](../REPORT.md) |
 | `exclusion_mask_shape` | An `exclusion_mask` was not built on the analysis grid. Library callers only |
 | `ensemble_unavailable` | `ensemble=true` on a host without the memory for it (this deployment) |
+| `invalid_simplify` | `/contours` asked for a tolerance outside 0–1000 m |
+| `invalid_image_size` | `/renderMap` asked for a width or height outside 240–1600 px |
+| `invalid_basemap` | `/renderMap` asked for a basemap that is not one of the four |
+| `invalid_frame` | `/renderMap` asked for a frame that is not `sheet` or `sites` |
+| `render_too_large` | The view needs more than 256 map tiles. Ask for a smaller image |
 
 The last few are not malformed requests, but to a client they are the same thing: nothing
 about the file changes, and only a different ask can help.

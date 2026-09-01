@@ -86,6 +86,17 @@ catchment with an error bar, the stage-storage curve, the yearly runoff, and a G
 `FeatureCollection` that loads straight into geojson.io. Errors always come back as
 `{"status": "error", "code", "detail", "hint"}`.
 
+`POST /api/v1/renderMap` takes the same file and the same parameters and returns a PNG
+instead of JSON: the catchment, the pond and the ranked sites drawn over satellite imagery
+and the contour lines underneath them, with a legend, a scale bar and the recommended
+site's area on it. It is the same analysis and the same colours as the GeoJSON, drawn
+server-side for a reader who has no map client in front of them. Optional `width`,
+`height`, `basemap` (`satellite`, `street`, `hillshade`, `none`), `contours`, `frame`
+(`sheet` or `sites`) and `legend`. Because a picture cannot carry a caveat, every warning
+the JSON would have returned comes back in the `X-Pond-Warnings` header — read it. If the
+tile server cannot be reached the image falls back to a hillshade of the uploaded sheet
+and says so there, rather than turning somebody else's outage into a 502.
+
 `POST /api/v1/contours` takes the same file and hands the contour lines straight back as
 a styled `FeatureCollection`, without analysing anything. It runs the same parser, so the
 lines it draws are the lines the analysis read, and it answers in well under a second
@@ -97,7 +108,7 @@ about.
 
 | Path | What lives there |
 |---|---|
-| `app/core/` | The analysis: parsing, projection, grid, flow routing, catchment, siting, hydrology |
+| `app/core/` | The analysis: parsing, projection, grid, flow routing, catchment, siting, hydrology, and the map renderer |
 | `app/pipeline.py` | Wires the stages together. The only orchestration point |
 | `app/providers/` | Swappable data sources. Rainfall lives here |
 | `app/routers/` | HTTP surface only: validation and error mapping |
