@@ -295,6 +295,9 @@
   .switch { display: flex; align-items: flex-start; gap: 9px; font-size: 13px; }
   .switch input { margin: 3px 0 0; flex: none; accent-color: var(--accent); }
   .switch span { color: var(--ink); }
+  /* A switch the host cannot honour still has to look unavailable, not merely off. */
+  .switch input:disabled { cursor: not-allowed; }
+  .switch:has(input:disabled) span { color: var(--muted); }
 
   /* --- the "what is this" disclosures --- */
   details.help { margin-top: 6px; }
@@ -625,7 +628,7 @@
         <div style="padding-bottom:10px">
           <div class="field">
             <label class="switch">
-              <input type="checkbox" id="ensemble" checked>
+              <input type="checkbox" id="ensemble">
               <span>Cross-check on three grids</span>
             </label>
             <div class="hint indented">
@@ -684,6 +687,8 @@
 // service, which is the normal case, it talks to its own origin, so the deployed URL
 // needs no configuration at all.
 const API = location.protocol === "file:" ? "http://localhost:8000" : "";
+const ensembleBox = document.getElementById("ensemble");
+const ensembleHint = document.querySelector("#ensemble").closest(".field").querySelector(".hint");
 document.getElementById("docs-link").href = API + "/docs";
 
 /* --------------------------------------------------------------------------
@@ -1780,7 +1785,7 @@ runButton.onclick = async () => {
   if (!chosen) return;
   const form = new FormData();
   form.append("contour_map", chosen, chosen.name);
-  form.append("ensemble", document.getElementById("ensemble").checked ? "true" : "false");
+  form.append("ensemble", ensembleBox.checked ? "true" : "false");
   optional(form, "top_n");
   optional(form, "curve_number");
   optional(form, "target_depth_m");
@@ -1802,7 +1807,7 @@ runButton.onclick = async () => {
   statusEl.replaceChildren(
     h("div", { class: "working" }, [h("div", { class: "spinner" }), label]),
     h("div", { class: "bar" }, [h("i")]),
-    h("div", { class: "hint", text: document.getElementById("ensemble").checked
+    h("div", { class: "hint", text: ensembleBox.checked
       ? "Four grids to build, so about ten seconds for a full contour sheet."
       : "One grid to build, so about four seconds for a full contour sheet." }),
   );
@@ -1850,11 +1855,36 @@ runButton.onclick = async () => {
     const body = await (await fetch(API + "/health")).json();
     el.className = "up";
     el.querySelector(".txt").textContent = "API v" + body.version;
+    applyEnsembleCapability(body);
   } catch {
     el.className = "down";
     el.querySelector(".txt").textContent = "API not reachable";
   }
 })();
+
+// The cross-check switch follows the host, not the HTML. On a small container
+// `allow_ensemble` is false and an `ensemble=true` run is refused with a 422, so a box
+// ticked in the markup means every upload fails on a page that otherwise looks healthy.
+//
+// So it ships off and /health turns it on, rather than shipping on and being turned off.
+// The difference is what happens in between: a page that starts ticked and is corrected
+// on load has a window where a click sends `ensemble=true` to a host that refuses it, and
+// on a host still waking up that window is seconds long. Starting off, the worst case is
+// an analysis without its error bar, which is the run this host was going to do anyway.
+//
+// Older builds do not report either field; they are read as available and on, which is
+// what they were.
+function applyEnsembleCapability(body) {
+  if (body.ensemble_available === false) {
+    ensembleBox.disabled = true;
+    ensembleHint.textContent =
+      "Not available on this host: the three-grid cross-check needs more memory than "
+      + "this container has. The analysis is otherwise unchanged, but the catchment area "
+      + "comes back without its error bar and confidence reads unassessed.";
+    return;
+  }
+  ensembleBox.checked = body.ensemble_default !== false;
+}
 
 resultsEl.appendChild(h("div", { class: "block" }, [
   h("div", { class: "empty" }, [

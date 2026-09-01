@@ -135,9 +135,17 @@ def create_app() -> FastAPI:
     @app.get("/health", response_model=HealthResponse, tags=["service"])
     async def health() -> HealthResponse:
         """Liveness check. Deliberately does no work: on a free tier this is what wakes
-        a sleeping instance, and it should answer before the first analysis, not after."""
+        a sleeping instance, and it should answer before the first analysis, not after.
+
+        It also carries what the host can afford, because the demo page asks this once on
+        load and has nowhere else to learn it.
+        """
         return HealthResponse(
-            status="ok", service=settings.api.title, version=settings.api.version
+            status="ok",
+            service=settings.api.title,
+            version=settings.api.version,
+            ensemble_available=settings.api.allow_ensemble,
+            ensemble_default=settings.api.default_ensemble and settings.api.allow_ensemble,
         )
 
     @app.get("/", include_in_schema=False)

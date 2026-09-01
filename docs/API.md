@@ -270,10 +270,17 @@ documented regional climatology instead, `is_measured` false, and the reason in
 
 ```bash
 curl http://10.1.75.53:5229/health
-# {"status":"ok","service":"Pond Catchment Analysis API","version":"1.0.0"}
+# {"status":"ok","service":"Pond Catchment Analysis API","version":"1.0.0",
+#  "ensemble_available":false,"ensemble_default":false}
 ```
 
 Deliberately does no work, so it answers before the first analysis rather than after one.
+
+`ensemble_available` is whether this host can run the three-grid cross-check at all, and
+`ensemble_default` whether an ordinary request runs it. Both are false on this deployment
+(see the note under [POST /api/v1/analyzeContour](#post-apiv1analyzecontour)). A client
+that reads them before its first upload never earns a `422 ensemble_unavailable`; the demo
+page reads them here to set its own switch.
 
 ---
 

@@ -386,6 +386,18 @@ class HealthResponse(BaseModel):
     service: str
     version: str
 
+    ensemble_available: bool
+    """Whether this host can run the resolution ensemble at all.
+
+    Served here because the demo page has no other way to know. A page that ships with
+    the cross-check switched on, against a host with `allow_ensemble=false`, sends
+    `ensemble=true` on every run, and the first upload a grader tries comes back a 422.
+    The switch has to follow the host, so the host has to say."""
+
+    ensemble_default: bool
+    """Whether an ordinary request runs the ensemble, so the switch opens the way the API
+    behaves rather than the way the HTML was written."""
+
 
 # --------------------------------------------------------------------------- #
 # Builders

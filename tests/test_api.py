@@ -114,6 +114,27 @@ def test_health_answers_without_doing_any_work(client: TestClient) -> None:
     assert body["version"] == settings.api.version
 
 
+def test_health_reports_what_the_host_can_afford(client: TestClient, monkeypatch) -> None:
+    """The demo page reads its ensemble switch off /health, so /health has to tell it.
+
+    Without this the page ships with the cross-check ticked, sends `ensemble=true` to a
+    host that refuses it, and every upload a grader tries comes back a 422 on a page that
+    looks perfectly healthy.
+    """
+    body = client.get("/health").json()
+    assert body["ensemble_available"] is settings.api.allow_ensemble
+
+    small_host = replace(
+        settings, api=replace(settings.api, allow_ensemble=False, default_ensemble=True)
+    )
+    monkeypatch.setattr(main, "settings", small_host)
+    body = client.get("/health").json()
+    assert body["ensemble_available"] is False
+    # Not merely "off by default": a host that cannot run it must not advertise it as the
+    # default either, or the page turns the switch back on.
+    assert body["ensemble_default"] is False
+
+
 def test_root_falls_back_to_the_docs_without_the_demo_page(
     client: TestClient, monkeypatch, tmp_path
 ) -> None:
