@@ -234,6 +234,32 @@ def test_a_request_with_no_file_names_the_field_it_wanted(
     assert "form-data" in body["hint"] and UPLOAD_FIELD_ALIAS in body["hint"]
 
 
+def test_a_text_row_where_a_file_belongs_names_the_postman_fix(
+    client: TestClient,
+) -> None:
+    """Postman's form-data rows are type Text until somebody changes them, so a row left
+    that way sends the filename as a string. Pydantic's own words for that are `Expected
+    UploadFile, received str`, which is true and no help. The answer has to name the
+    control to change."""
+    response = client.post(ENDPOINT, data={UPLOAD_FIELD: "contours_1m.kml"})
+    body = response.json()
+
+    assert response.status_code == 422
+    assert body["code"] == "invalid_request"
+    assert "not as a file" in body["detail"]
+    assert "Postman" in body["hint"] and "File" in body["hint"]
+    assert "UploadFile" not in body["detail"] and "UploadFile" not in body["hint"]
+
+
+def test_the_alias_field_gets_the_same_answer_when_sent_as_text(
+    client: TestClient,
+) -> None:
+    body = client.post(ENDPOINT, data={UPLOAD_FIELD_ALIAS: "contours_1m.kml"}).json()
+
+    assert body["code"] == "invalid_request"
+    assert "not as a file" in body["detail"]
+
+
 def test_docs_advertise_the_brief_field_and_only_that_one(client: TestClient) -> None:
     """`/docs` is where a grader looks for the field name, so it must show the one the
     brief fixed and must not offer a second file picker beside it."""

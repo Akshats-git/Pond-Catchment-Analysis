@@ -406,7 +406,7 @@ file has to change.
 | Code | Cause |
 |---|---|
 | `missing_file` | No contour map in the request. It goes in the `contour_map` field |
-| `invalid_request` | A field of the wrong type (FastAPI validation) |
+| `invalid_request` | A field of the wrong type. Includes a `contour_map` row left as Text in Postman rather than File, which is answered by name |
 | `invalid_resolution` | `grid_resolution` outside the 2–20 m band |
 | `curve_number_out_of_range` | `curve_number` outside 30–98 |
 | `bad_target_depth` | `target_depth_m` not positive |

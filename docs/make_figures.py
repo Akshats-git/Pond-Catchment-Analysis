@@ -45,7 +45,7 @@ def fig_dem(result) -> None:
     im = ax.imshow(z, cmap="terrain", origin="lower", alpha=0.65)
     fig.colorbar(im, ax=ax, label="elevation (m)", shrink=0.82)
     ax.set_title(
-        f"DEM from {result.contours.metadata.line_count} contour lines — "
+        f"DEM from {result.contours.metadata.line_count} contour lines, "
         f"{z.shape[1]}x{z.shape[0]} cells at {dem.resolution_m:.2f} m",
         fontsize=10,
     )
@@ -63,7 +63,7 @@ def fig_accumulation(result) -> None:
     im = ax.imshow(np.log10(np.where(np.isfinite(acc), acc, np.nan) + 1), cmap="Blues",
                    origin="lower")
     fig.colorbar(im, ax=ax, label="log10(cells draining through)", shrink=0.82)
-    ax.set_title("Flow accumulation — the channels emerge, unlabelled, from the routing",
+    ax.set_title("Flow accumulation: the channels emerge, unlabelled, from the routing",
                  fontsize=10)
     ax.set_xticks([])
     ax.set_yticks([])
@@ -83,7 +83,7 @@ def fig_catchment(result) -> None:
     ax.plot(c, r, "o", ms=9, mfc="#1b6ac9", mec="white", mew=1.6, label="outlet / pond site")
     ax.legend(loc="lower right", fontsize=9, framealpha=0.9)
     ax.set_title(
-        f"Catchment of site 1 — {site.catchment.area_ha:.1f} ha, "
+        f"Catchment of site 1: {site.catchment.area_ha:.1f} ha, "
         f"{site.catchment.edge_contact * 100:.1f}% edge contact, confidence {site.confidence}",
         fontsize=10,
     )

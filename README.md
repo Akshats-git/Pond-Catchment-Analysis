@@ -10,10 +10,11 @@ into it, and how much water that ground delivers in an average year.
 curl -F contour_map=@data/contours_1m.kml http://10.1.75.53:5229/api/v1/analyzeContour
 ```
 
-Phase 2 of the Village Pond Planning System. The Phase 1 high-level design is in
-[references/](references/). The report is [REPORT.md](REPORT.md), the API reference is
-[docs/API.md](docs/API.md), the full implementation plan is in [PLAN.md](PLAN.md), and
-the evidence behind the numbers is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
+Phase 2 of the Village Pond Planning System, which the provided Phase 1 high-level
+design describes. The report is
+[Pond_Catchment_Analysis_Report.pdf](Pond_Catchment_Analysis_Report.pdf), the API
+reference is [docs/API.md](docs/API.md), and the evidence behind the numbers is in
+[docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
 ## How it works
 
@@ -142,7 +143,7 @@ killing the worker). Responses from the container carry no error bar.
 
 Analyses run one at a time everywhere, not just there: two at once need over a gigabyte,
 and on a small host they do not queue, they OOM. Concurrent requests wait their turn.
-Details in [REPORT.md §7](REPORT.md).
+Details in section 7 of [the report](Pond_Catchment_Analysis_Report.pdf).
 
 ## Configuration
 
@@ -165,15 +166,15 @@ POND_API_MAX_CONCURRENT_ANALYSES=1         # analyses that run at once; the rest
 pytest
 ```
 
-428 tests, about 127 seconds, all passing. No test needs the network:
+451 tests, about 135 seconds, all passing. No test needs the network:
 `tests/conftest.py` switches the live rainfall fetch off, and the Open-Meteo provider is
 exercised against a payload built in the test.
 
 ## Status
 
-Complete. All twelve phases done, one commit per phase (see PLAN.md §7).
+Complete. All twelve phases done, one commit per phase.
 
 - [x] Phases 0 to 10, scaffold through the demo page
 - [x] Phase 11, deployed on `stu68_sys1` at http://10.1.75.53:5229
-- [x] Phase 12, [REPORT.md](REPORT.md), [docs/API.md](docs/API.md),
-      [docs/METHODOLOGY.md](docs/METHODOLOGY.md)
+- [x] Phase 12, [the report](Pond_Catchment_Analysis_Report.pdf),
+      [docs/API.md](docs/API.md), [docs/METHODOLOGY.md](docs/METHODOLOGY.md)

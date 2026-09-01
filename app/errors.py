@@ -33,6 +33,24 @@ def error_body(code: str, detail: str, hint: str = "") -> dict:
     return {"status": "error", "code": code, "detail": detail, "hint": hint}
 
 
+_FILE_FIELDS = ("contour_map", "file")
+
+
+def _text_where_a_file_belongs(exc: RequestValidationError) -> bool:
+    """True when the upload field arrived as a form value rather than as a file.
+
+    Postman's form-data rows default to type Text, and a row left that way sends the
+    filename as a string. Pydantic then reports `Expected UploadFile, received str`,
+    which is accurate and no use at all to the person holding the mouse.
+    """
+    for error in exc.errors():
+        location = error.get("loc") or ()
+        field = str(location[-1]) if location else ""
+        if field in _FILE_FIELDS and "UploadFile" in str(error.get("msg", "")):
+            return True
+    return False
+
+
 def install_handlers(app) -> None:
     """Attach the handlers. Called by `app.main`; kept here so the shape of an error and
     the rendering of one live in the same file."""
@@ -51,6 +69,17 @@ def install_handlers(app) -> None:
         # FastAPI rejects a missing or mistyped form field before the route body runs.
         # Without this the response would be FastAPI's `{"detail": [...]}`, which is a
         # second error format for clients to learn.
+        if _text_where_a_file_belongs(exc):
+            return JSONResponse(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                content=error_body(
+                    "invalid_request",
+                    "The contour map arrived as a text value, not as a file.",
+                    "In Postman: Body, form-data, set the contour_map row's type to "
+                    "File and choose the .kml or .kmz. With curl: "
+                    "-F contour_map=@contours.kml, with the @.",
+                ),
+            )
         problems = "; ".join(
             f"{'.'.join(str(part) for part in error['loc'][1:]) or 'request'}: "
             f"{error['msg']}"
