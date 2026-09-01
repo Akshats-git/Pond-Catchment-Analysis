@@ -14,12 +14,14 @@ boundaries so Phases 3+ bolt on without rework.
 
 ## 1. Rubric mapping
 
-| Rubric item | Marks | Where it is earned |
-|---|---|---|
-| Working API URL | 5 | Phase 9 (route) + Phase 11 (deploy) |
-| Catchment Analysis / Estimation | 10 | Phases 2–6, validated in Phase 5 |
-| Report | 3 | Phase 12 |
-| Code Reusability | 2 | `core/` + `providers/` seams, present from Phase 1 |
+All four are delivered; the report that presents them is [REPORT.md](REPORT.md).
+
+| Rubric item | Marks | Where it is earned | Status |
+|---|---|---|---|
+| Working API URL | 5 | Phase 9 (route) + Phase 11 (deploy) → http://10.1.75.53:5229 | ✅ |
+| Catchment Analysis / Estimation | 10 | Phases 2–6, validated in Phase 5 | ✅ |
+| Report | 3 | Phase 12 — `REPORT.md`, `docs/API.md`, `docs/METHODOLOGY.md` | ✅ |
+| Code Reusability | 2 | `core/` + `providers/` seams, present from Phase 1 | ✅ |
 
 ---
 
@@ -166,10 +168,10 @@ daily distribution; Phase 3 swaps in real daily rainfall from Open-Meteo behind 
 | Layer | Choice | Why |
 |---|---|---|
 | API | FastAPI + Uvicorn | Async, auto Swagger at `/docs`, Pydantic validation. Matches HLD. |
-| Numerics | numpy + scipy **only** | No GDAL/pysheds/rasterio ⇒ small image, deploys on a free tier. |
+| Numerics | numpy + scipy **only** | No GDAL/pysheds/rasterio ⇒ installs with no system packages, inside a 512 MB container. |
 | Parsing | stdlib `xml.etree`, `zipfile` | KML is XML; KMZ is a zip. No extra dependency. |
 | Frontend demo | Leaflet (CDN-free, single file) | Makes the live URL self-demonstrating for the grader. |
-| Deploy | Docker → Render free tier | Public HTTPS URL, no card required. |
+| Deploy | uvicorn on the lab container `stu68_sys1` | Port-forwarded URL on the allocated infrastructure. No cloud tier needed. |
 
 `requirements.txt`: `fastapi`, `uvicorn[standard]`, `python-multipart`, `numpy`, `scipy`, `pydantic`.
 
@@ -215,10 +217,11 @@ pond-catchment-api/
 ├── data/contours_1m.kml
 ├── docs/
 │   ├── API.md
-│   └── METHODOLOGY.md
+│   ├── METHODOLOGY.md
+│   ├── make_figures.py          regenerates the report figures from a real run
+│   └── figures/                 the four PNGs REPORT.md embeds
 ├── requirements.txt
-├── Dockerfile
-├── render.yaml
+├── run.sh                       serves it on the lab container (no Dockerfile: Phase 11)
 ├── README.md
 └── REPORT.md
 ```
@@ -229,21 +232,23 @@ pond-catchment-api/
 
 One commit per phase. Each phase is independently testable and leaves the repo working.
 
-| # | Phase | Commit message | Est. |
-|---|---|---|---|
-| 0 | Scaffold | `chore: scaffold repo, deps, sample data` | 20 m |
-| 1 | KML/KMZ parser | `feat: KML/KMZ contour parser with elevation strategies` | 1 h |
-| 2 | Projection + DEM | `feat: local metric projection and contour-interpolated DEM` | 1 h |
-| 3 | Terrain engine | `feat: pit filling, D8 flow direction, flow accumulation` | 1.5 h |
-| 4 | Catchment | `feat: upstream catchment delineation with area and edge contact` | 1 h |
-| 5 | **Validation** | `test: analytic catchment validation and mass balance` | 1.5 h |
-| 6 | Pond siting | `feat: catchment-ranked pond site selection` | 1 h |
-| 7 | Hydrology | `feat: event-based SCS-CN runoff and stage-storage capacity` | 1 h |
-| 8 | GeoJSON | `feat: GeoJSON export of catchment, outlet and flow path` | 45 m |
-| 9 | API route | `feat: POST /analyzeContour endpoint with structured errors` | 1.5 h |
-| 10 | Demo page | `feat: Leaflet demo page for uploading and viewing results` | 45 m |
-| 11 | Deploy | `chore: Dockerfile and Render deployment config` | 45 m |
-| 12 | Docs | `docs: report, API reference and methodology` | 1.5 h |
+All twelve are complete.
+
+| # | Phase | Commit message | Est. | Done |
+|---|---|---|---|---|
+| 0 | Scaffold | `chore: scaffold repo, deps, sample data` | 20 m | ✅ |
+| 1 | KML/KMZ parser | `feat: KML/KMZ contour parser with elevation strategies` | 1 h | ✅ |
+| 2 | Projection + DEM | `feat: local metric projection and contour-interpolated DEM` | 1 h | ✅ |
+| 3 | Terrain engine | `feat: pit filling, D8 flow direction, flow accumulation` | 1.5 h | ✅ |
+| 4 | Catchment | `feat: upstream catchment delineation with area and edge contact` | 1 h | ✅ |
+| 5 | **Validation** | `test: analytic catchment validation and mass balance` | 1.5 h | ✅ |
+| 6 | Pond siting | `feat: catchment-ranked pond site selection` | 1 h | ✅ |
+| 7 | Hydrology | `feat: event-based SCS-CN runoff and stage-storage capacity` | 1 h | ✅ |
+| 8 | GeoJSON | `feat: GeoJSON export of catchment, outlet and flow path` | 45 m | ✅ |
+| 9 | API route | `feat: POST /analyzeContour endpoint with structured errors` | 1.5 h | ✅ |
+| 10 | Demo page | `feat: Leaflet demo page for uploading and viewing results` | 45 m | ✅ |
+| 11 | Deploy | `chore: run on stu68_sys1, forwarded to 10.1.75.53:5229` | 45 m | ✅ |
+| 12 | Docs | `docs: report, API reference and methodology` | 1.5 h | ✅ |
 
 ---
 
@@ -495,28 +500,47 @@ OSM/Esri satellite tiles, side panel with the numbers. Single file, no build ste
 
 ---
 
-### Phase 11 — Deployment
-`Dockerfile` (python:3.12-slim, `pip install -r requirements.txt`, uvicorn on `$PORT`),
-`render.yaml`. Deploy to Render free tier.
+### Phase 11 — Deployment ✅
+**Done, but not as planned.** No Docker image, no Render, no cloud tier: the service runs
+on the allocated lab container `stu68_sys1` and is reached through the lab's own port
+forward, which is the infrastructure the assignment provides.
 
-> ⚠ Free tier sleeps — cold start ~30 s. Note it in the report and keep a `curl`
-> transcript + screenshots so the demo does not depend on the tier being awake.
-> Cap `grid_resolution` server-side so a request cannot exhaust 512 MB RAM.
+```
+laptop ──► 10.1.75.53:5229 ──► container 172.17.0.30:5000 ──► uvicorn (0.0.0.0:5000)
+```
 
-**Accept:** public HTTPS URL responds to `/health` and a real upload.
+`run.sh` on the container exports the settings, binds `0.0.0.0:5000` — never `127.0.0.1`,
+or the forward has nothing to reach — and restarts uvicorn if it dies. The venv is built
+with `python3 -m venv --without-pip` plus `get-pip.py`, because the container has neither
+`python3-venv` nor sudo.
+
+> The 512 MB warning above was right, and it landed on the part that was not expected.
+> `grid_resolution` *is* capped server-side (`max_grid_cells = 12,000,000`), and a single
+> grid peaks near 300 MB. The **four-grid ensemble peaks at 581 MB** and is OOM-killed, so
+> it is off on the container via `POND_API_DEFAULT_ENSEMBLE=false`. Responses served there
+> carry no cross-resolution error bar. See REPORT.md §7.
+
+**Accept:** ✅ the forwarded URL answers `/health`, `/docs`, `/openapi.json`, the demo
+page, `/api/v1/rainfall` (live Open-Meteo), and a real upload — 200 in ~15 s on the
+sample sheet, verified from outside the container.
 
 ---
 
-### Phase 12 — Documentation
-- `README.md` — what it is, quickstart, live URL, one-command Docker run.
-- `docs/API.md` — endpoints, every parameter, every response field, error codes, `curl`
+### Phase 12 — Documentation ✅
+- ✅ `README.md` — what it is, quickstart, live URL, how to restart it on the container.
+  (No Docker run: there is no image, see Phase 11.)
+- ✅ `docs/API.md` — endpoints, every parameter, every response field, error codes, `curl`
   examples.
-- `docs/METHODOLOGY.md` — §2 and §3 of this plan, with the analytic table as Table 1.
-- `REPORT.md` (→ PDF) — GitHub link, live API URL, catchment approach, demonstration on
-  the provided map with figures, API documentation, extensibility to Phase 3.
+- ✅ `docs/METHODOLOGY.md` — §2 and §3 of this plan, with the analytic table as Table 1.
+- ✅ `REPORT.md` — GitHub link, live API URL, catchment approach, demonstration on the
+  provided map with figures, API documentation, extensibility to Phase 3.
 
-**Figures to generate:** DEM hillshade, flow accumulation (log scale), catchment overlay
-for the top site, stage–storage curve, analytic-validation table.
+**Figures:** ✅ DEM hillshade, flow accumulation (log scale), catchment overlay for the
+top site, stage–storage curve, in `docs/figures/`. The analytic-validation table is
+REPORT.md §4 Test A. All four are regenerated from one real pipeline run by
+`docs/make_figures.py`, so a figure cannot drift from what the endpoint reports;
+matplotlib is a documentation dependency only and is deliberately kept out of
+`requirements.txt`.
 
 ---
 

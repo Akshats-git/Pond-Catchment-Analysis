@@ -12,7 +12,13 @@ env/
 # Numeric caches / generated artefacts
 *.npy
 *.npz
-docs/figures/
+# docs/figures/ is NOT ignored: those four PNGs are figures in REPORT.md, and a report
+# whose images only exist on the machine that generated them is a broken report.
+# Regenerate them with `python docs/make_figures.py`.
+
+# Runtime logs from run.sh
+server.log
+pytest.log
 
 # Editors / OS
 .vscode/

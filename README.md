@@ -3,10 +3,17 @@
 Send a contour map as KML or KMZ. Get back a village pond site, the ground that drains
 into it, and how much water that ground delivers in an average year.
 
+**Live at http://10.1.75.53:5229** — [demo page](http://10.1.75.53:5229/),
+[API documentation](http://10.1.75.53:5229/docs).
+
+```bash
+curl -F file=@data/contours_1m.kml http://10.1.75.53:5229/api/v1/analyzeContour
+```
+
 Phase 2 of the Village Pond Planning System. The Phase 1 high-level design is in
-[references/](references/). The full implementation plan, with the validated catchment
-methodology, is in [PLAN.md](PLAN.md), and the evidence is in
-[docs/METHODOLOGY.md](docs/METHODOLOGY.md).
+[references/](references/). The report is [REPORT.md](REPORT.md), the API reference is
+[docs/API.md](docs/API.md), the full implementation plan is in [PLAN.md](PLAN.md), and
+the evidence behind the numbers is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
 ## How it works
 
@@ -82,7 +89,29 @@ catchment with an error bar, the stage-storage curve, the yearly runoff, and a G
 | `tests/` | Analytic validation, mass balance, structural variants |
 | `static/` | `index.html`, the demo page. One file, no build step, no CDN |
 | `data/` | `contours_1m.kml`, the provided sample sheet |
-| `docs/` | Methodology and the evidence behind the numbers |
+| `docs/` | Report evidence: methodology, API reference, figures |
+
+## Deployment
+
+The service runs on the lab container `stu68_sys1`, forwarded to
+**http://10.1.75.53:5229**:
+
+```
+laptop ──► 10.1.75.53:5229 ──► container 172.17.0.30:5000 ──► uvicorn (0.0.0.0:5000)
+```
+
+`run.sh` on the container sets the environment, binds `0.0.0.0:5000` and restarts uvicorn
+if it dies. To bring it back up after a container restart:
+
+```bash
+ssh -p 2229 student@10.1.75.53
+setsid ~/PondCatchmentAnalysis/run.sh >/dev/null 2>&1 </dev/null &
+```
+
+The container is capped at 512 MB. One grid peaks near 300 MB and fits; the four-grid
+ensemble peaks at 581 MB and does not, so it is off there via
+`POND_API_DEFAULT_ENSEMBLE=false` and responses from the container carry no error bar.
+Details in [REPORT.md §7](REPORT.md).
 
 ## Configuration
 
@@ -103,13 +132,15 @@ POND_API_DEFAULT_ENSEMBLE=false            # one grid instead of four, roughly 3
 pytest
 ```
 
-388 tests, about 105 seconds. No test needs the network: `tests/conftest.py` switches the
-live rainfall fetch off, and the Open-Meteo provider is exercised against a payload built
-in the test.
+388 tests, about 113 seconds, all passing. No test needs the network:
+`tests/conftest.py` switches the live rainfall fetch off, and the Open-Meteo provider is
+exercised against a payload built in the test.
 
 ## Status
 
-Under construction, one commit per phase (see PLAN.md §7).
+Complete. All twelve phases done, one commit per phase (see PLAN.md §7).
 
 - [x] Phases 0 to 10, scaffold through the demo page
-- [ ] Phases 11 and 12, deployment and report
+- [x] Phase 11, deployed on `stu68_sys1` at http://10.1.75.53:5229
+- [x] Phase 12, [REPORT.md](REPORT.md), [docs/API.md](docs/API.md),
+      [docs/METHODOLOGY.md](docs/METHODOLOGY.md)
