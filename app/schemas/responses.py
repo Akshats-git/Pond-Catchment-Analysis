@@ -26,7 +26,9 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.core.geojson import ContourDrawing
 from app.core.hydrology import WaterBalance
+from app.core.kml_parser import ContourSet
 from app.core.pond_siting import PondSite
 from app.pipeline import AnalysisResult
 from app.providers.rainfall import RainfallSeries
@@ -34,10 +36,12 @@ from app.schemas.requests import AnalysisParams
 
 __all__ = [
     "AnalysisResponse",
+    "ContourResponse",
     "ErrorResponse",
     "HealthResponse",
     "RainfallResponse",
     "analysis_response",
+    "contour_response",
     "rainfall_response",
     "site_reasons",
 ]
@@ -298,6 +302,45 @@ class AnalysisResponse(BaseModel):
     timing_ms: dict[str, float]
 
 
+class ContourResponse(BaseModel):
+    """`POST /contours`. The uploaded sheet handed straight back as drawable lines.
+
+    No analysis in it, which is the point: this answers in a quarter of a second where
+    `/analyzeContour` takes several seconds, so a client can put the contours on the map
+    while the reader is still filling in the parameter panel, and lay the catchment over
+    them when it arrives.
+    """
+
+    status: str = "ok"
+    filename: str
+    contour_count: int = Field(description="Lines drawn, one feature each.")
+    vertex_count: int = Field(
+        description="Points in the drawing after thinning, not points in the file. "
+        "`input.vertex_count` from an analysis of the same file is the latter."
+    )
+    source_vertex_count: int = Field(description="Points in the file, before thinning.")
+    simplify_tolerance_m: float = Field(
+        description="How far a drawn line may depart from the one in the file. Kept "
+        "below the grid resolution the analysis runs on, so the overlay and the "
+        "catchment are drawn off the same geometry."
+    )
+    elevation_source: str
+    interval_m: float | None
+    level_count: int
+    elevation_range_m: list[float]
+    index_interval_m: float | None = Field(
+        description="Spacing of the heavy lines, or null when the file has no regular "
+        "contour interval to count them off."
+    )
+    bbox: list[float] = Field(description="[min_lon, min_lat, max_lon, max_lat].")
+    geojson: dict[str, Any] = Field(
+        description="FeatureCollection of LineStrings, one per contour. Each carries "
+        "`elevation_m`, an `index` flag, and simplestyle colours off an elevation ramp."
+    )
+    warnings: list[str] = Field(default_factory=list)
+    timing_ms: dict[str, float]
+
+
 class RainfallResponse(BaseModel):
     """`GET /rainfall`. What the free rainfall feed says about one point.
 
@@ -497,6 +540,37 @@ def rainfall_response(
         is_measured=series.is_measured,
         description=series.description,
         warnings=list(series.warnings),
+    )
+
+
+def contour_response(
+    contours: ContourSet,
+    drawing: ContourDrawing,
+    filename: str,
+    timing_ms: dict[str, float],
+) -> ContourResponse:
+    """A parsed `ContourSet` and its drawing -> the JSON body of `POST /contours`."""
+    meta = contours.metadata
+    interval = meta.interval_m
+    return ContourResponse(
+        filename=filename,
+        contour_count=len(drawing.geojson["features"]),
+        vertex_count=drawing.vertex_count,
+        source_vertex_count=contours.vertex_count,
+        simplify_tolerance_m=drawing.tolerance_m,
+        elevation_source=meta.elevation_source,
+        interval_m=interval,
+        level_count=meta.level_count,
+        elevation_range_m=[_r(v, 2) for v in meta.elevation_range],
+        index_interval_m=(
+            _r(interval * settings.geojson.contour_index_every, 2)
+            if interval is not None and settings.geojson.contour_index_every > 1
+            else None
+        ),
+        bbox=[_r(v, 6) for v in meta.bbox],
+        geojson=drawing.geojson,
+        warnings=list(meta.warnings) + list(drawing.warnings),
+        timing_ms=timing_ms,
     )
 
 

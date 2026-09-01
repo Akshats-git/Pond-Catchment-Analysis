@@ -24,6 +24,11 @@ held in places, and blocking the event loop would stall every other request incl
 `/health`. `anyio.fail_after` bounds how long a client waits; it cannot interrupt numpy
 mid-array, so the thread finishes on its own. The timeout is a promise to the caller,
 not a kill switch, and it is documented as such rather than overstated.
+
+**`/contours` is the exception to the semaphore.** It holds a parsed file and nothing
+else — no grid, no flow field — so it is not what the concurrency limit is protecting
+against, and gating it would defeat the point: the demo page asks for it *while* an
+analysis of the same sheet is queued or running.
 """
 
 from __future__ import annotations
@@ -38,19 +43,21 @@ from pydantic import ValidationError
 
 from app.config import settings
 from app.core.dem_builder import DEMBuildError
-from app.core.geojson import GeoJSONError
+from app.core.geojson import GeoJSONError, contour_drawing
 from app.core.hydrology import HydrologyError
-from app.core.kml_parser import ContourParseError
+from app.core.kml_parser import ContourParseError, parse_contours
 from app.core.pond_siting import SitingError
 from app.errors import APIError
-from app.pipeline import AnalysisError, analyse
+from app.pipeline import AnalysisError, Stopwatch, analyse
 from app.providers.rainfall import rainfall_for
 from app.schemas.requests import AnalysisParams
 from app.schemas.responses import (
     AnalysisResponse,
+    ContourResponse,
     ErrorResponse,
     RainfallResponse,
     analysis_response,
+    contour_response,
     rainfall_response,
 )
 
@@ -99,6 +106,7 @@ _STATUS_BY_CODE: dict[str, int] = {
     "no_ground_clear_of_watercourse": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "no_site_found": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "ensemble_unavailable": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "invalid_simplify": status.HTTP_422_UNPROCESSABLE_ENTITY,
 }
 """Codes that are not 400. Everything else the core raises is a file that cannot be
 analysed, which is what 400 means here."""
@@ -292,6 +300,93 @@ async def analyze_contour(
         ) from exc
 
     response = analysis_response(result)
+    extension = _extension_warning(filename)
+    if extension is not None:
+        response.warnings.insert(0, extension)
+    return response
+
+
+_CONTOUR_RESPONSES: dict[int | str, dict] = {
+    400: {"model": ErrorResponse, "description": "The file cannot be read."},
+    413: {"model": ErrorResponse, "description": "Upload too large."},
+    422: {"model": ErrorResponse, "description": "The simplification asked for is not usable."},
+    504: {"model": ErrorResponse, "description": "Reading the file exceeded the time limit."},
+}
+
+
+@router.post(
+    "/contours",
+    response_model=ContourResponse,
+    responses=_CONTOUR_RESPONSES,
+    summary="Draw the uploaded contour sheet, without analysing it",
+)
+async def contours(
+    file: UploadFile = File(
+        ..., description="Contour map as .kml or .kmz. The same file /analyzeContour takes."
+    ),
+    simplify_m: float | None = Form(
+        None,
+        description="How far a drawn line may depart from the one in the file, in "
+        "metres. 0 sends every vertex. Leave it out for the default, which is finer "
+        "than the grid the analysis runs on.",
+    ),
+) -> ContourResponse:
+    """The contour lines in an uploaded sheet, styled and thinned for a map.
+
+    The parser and nothing else, so this answers in a fraction of a second where
+    `/analyzeContour` takes seconds. It exists because a catchment boundary drawn on
+    satellite imagery is not checkable by eye: the ground is right when the boundary
+    follows the ridges, and only the contours show where those are. Ask for these, lay
+    the analysis over them, and the answer can be read rather than taken on trust.
+
+    Every line comes back as a `LineString` carrying its `elevation_m`, an `index` flag
+    for the heavy lines a topographic sheet prints every fifth level, and simplestyle
+    colours off an elevation ramp, so the collection draws the same in this service's
+    demo page and in geojson.io.
+
+    Not gated by the analysis semaphore: parsing costs a few megabytes and a moment,
+    which is the whole reason to have this as its own endpoint rather than a flag on the
+    analysis. Sending it back with the catchment would put a megabyte on every response
+    whether or not the client draws it.
+    """
+    if simplify_m is not None and not 0.0 <= simplify_m <= 1000.0:
+        raise APIError(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "invalid_simplify",
+            f"simplify_m is {simplify_m}, and it has to be between 0 and 1000 metres.",
+            "Leave it out to get the default, which is finer than the analysis grid.",
+        )
+
+    filename = file.filename or "upload.kml"
+    data = await _read_upload(file)
+    watch = Stopwatch()
+
+    def work():
+        with watch.stage("parse"):
+            parsed = parse_contours(data, filename)
+        with watch.stage("draw"):
+            return parsed, contour_drawing(parsed, tolerance_m=simplify_m)
+
+    try:
+        with anyio.fail_after(settings.api.request_timeout_s):
+            parsed, drawing = await run_in_threadpool(work)
+    except TimeoutError as exc:
+        raise APIError(
+            status.HTTP_504_GATEWAY_TIMEOUT,
+            "analysis_timeout",
+            f"Reading the contours did not finish within "
+            f"{settings.api.request_timeout_s:.0f} s.",
+            "Ask for a coarser simplify_m, or clip the sheet to the area of interest.",
+        ) from exc
+    except _ANALYSIS_ERRORS as exc:
+        raise APIError(
+            _STATUS_BY_CODE.get(exc.code, status.HTTP_400_BAD_REQUEST),
+            exc.code,
+            exc.detail,
+            exc.hint,
+        ) from exc
+
+    response = contour_response(parsed, drawing, filename, watch.finish())
     extension = _extension_warning(filename)
     if extension is not None:
         response.warnings.insert(0, extension)

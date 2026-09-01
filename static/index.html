@@ -152,6 +152,19 @@
   #overlay { position: absolute; inset: 0; pointer-events: none; }
   #overlay .hit { pointer-events: auto; cursor: pointer; }
 
+  /* The contour layer is built once and moved by a single transform, the way the tiles
+     are, because 30,000 vertices rebuilt on every frame would cost more than the rest of
+     the map put together. `vector-effect` is what makes that safe: the group is scaled by
+     the zoom, and without it a hairline at zoom 13 would be a 60 px band at zoom 19. */
+  #contours { position: absolute; inset: 0; pointer-events: none; }
+  #contours path { fill: none; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+  /* The ramp is pitched to read on satellite imagery, which is dark. On the street map,
+     which is nearly white, the same colours need taking down. */
+  #contours.street { filter: brightness(.62) saturate(1.25); }
+  /* Zoomed out far enough that a 1 m sheet would draw as a solid wash, only the index
+     lines are kept. Hiding them is what makes the shape of the ground legible. */
+  #contours.sparse .minor { display: none; }
+
   .map-ui {
     position: absolute; z-index: 5;
     background: var(--panel);
@@ -168,8 +181,24 @@
   }
   #layers button + button { border-left: 1px solid var(--line); }
   #layers button.on { background: var(--accent); color: var(--on-accent); }
+
+  #overlays { top: 57px; right: 12px; display: flex; overflow: hidden; }
+  #overlays button {
+    border: 0; background: none; padding: 7px 12px; font: inherit; font-size: 12.5px;
+    cursor: pointer; color: var(--muted); display: flex; align-items: center; gap: 7px;
+  }
+  #overlays button.on { background: var(--accent); color: var(--on-accent); }
+  #overlays button:disabled { opacity: .5; cursor: default; }
+  #overlays .pip {
+    width: 8px; height: 8px; border-radius: 50%; flex: none;
+    background: linear-gradient(135deg, #a8500f, #ffd166);
+  }
+  #overlays button.on .pip { background: #fff; }
+  #overlays button.failed { color: var(--bad); }
+  #overlays button.failed .pip { background: var(--bad); }
+
   #zoom {
-    top: 58px; right: 12px; display: flex; flex-direction: column; overflow: hidden;
+    top: 102px; right: 12px; display: flex; flex-direction: column; overflow: hidden;
   }
   #zoom button {
     border: 0; background: none; width: 32px; height: 30px; font: inherit; font-size: 16px;
@@ -188,6 +217,7 @@
   #legend .sw.faint { opacity: .38; }
   #legend .sw.line { height: 0; border-top: 2.5px solid #e31a1c; border-radius: 0; }
   #legend .sw.dot { width: 11px; height: 11px; border-radius: 50%; }
+  #legend .sub { margin: 1px 0 5px 25px; font-size: 11px; color: var(--muted); }
 
   #attribution {
     position: absolute; bottom: 0; right: 0; z-index: 5;
@@ -460,11 +490,18 @@
 <main>
   <div id="map">
     <div id="tiles"></div>
+    <svg id="contours" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
     <svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg>
     <div id="banner">Click the map to place the pour point</div>
     <div id="layers" class="map-ui">
       <button data-layer="satellite" class="on">Satellite</button>
       <button data-layer="street">Street</button>
+    </div>
+    <div id="overlays" class="map-ui">
+      <button id="contour-toggle" disabled title="Choose a contour map first">
+        <span class="pip" aria-hidden="true"></span>
+        <span class="txt">Contours</span>
+      </button>
     </div>
     <div id="zoom" class="map-ui">
       <button id="zoom-in" title="Zoom in">+</button>
@@ -490,6 +527,11 @@
       </div>
       <input type="file" id="file" hidden
              accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz">
+      <div class="hint" style="margin-top:8px">
+        Once a file is chosen, <b>Contours</b> at the top right of the map draws its
+        lines. Leave them on and the catchment lands on top of them, which is how you
+        check the boundary follows the ridges.
+      </div>
     </div>
 
     <!-- 2. the settings -------------------------------------------------- -->
@@ -759,6 +801,212 @@ function renderTiles() {
   document.getElementById("attribution").innerHTML = layer.credit;
 }
 
+/* --------------------------------------------------------------------------
+ * The contour layer
+ *
+ * The contours are the evidence for the answer. A catchment boundary drawn on satellite
+ * imagery cannot be checked by eye, because imagery does not show where the ridges are;
+ * with the contours under it, a reader can see for themselves that the line runs along
+ * the high ground and closes at the pond.
+ *
+ * They come from `POST /api/v1/contours`, which is the same parser the analysis uses, so
+ * what is drawn is what was analysed rather than a second reading of the file.
+ *
+ * Unlike the answer, these lines never change. So they are laid out once in the Web
+ * Mercator pixel grid at a fixed reference zoom and then moved by one SVG transform,
+ * exactly as the tile layer is moved by one CSS transform. Rebuilding 30,000 vertices of
+ * path data on every frame of a pan is the one thing that would make this map feel slow.
+ * ----------------------------------------------------------------------- */
+const CONTOUR_ZOOM = 22;
+/* World pixels at this zoom are about 3.5 cm on the ground at Indian latitudes, forty
+   times finer than the thinning the service already applied, so the path data rounds to
+   whole units and the strings stay short. */
+
+const contourEl = document.getElementById("contours");
+const contourButton = document.getElementById("contour-toggle");
+
+const contours = {
+  file: null,       // the File these lines were read from, so a new upload invalidates them
+  on: false,
+  loading: false,
+  error: null,
+  meta: null,       // the response, minus the geometry
+  origin: null,     // world-pixel offset the path data is written relative to
+  spacing_m: null,  // mean distance between neighbouring contours, for the sparse rule
+  group: null,
+};
+
+function contoursDrawn() { return contours.on && contours.group !== null; }
+
+function buildContourLayer(collection) {
+  const world = TILE * Math.pow(2, CONTOUR_ZOOM);
+  const bbox = collection.bbox;
+  // North-west corner of the sheet: the smallest fx and, because y grows southward, the
+  // smallest fy. Subtracting it keeps path coordinates near zero instead of near 10^9.
+  const [ox, oy] = project(bbox[0], bbox[3]).map((f) => Math.floor(f * world));
+
+  // One path per distinct style rather than one per line. The service colours by
+  // elevation, so a 32-level sheet has 32 styles and 1,355 lines, and merging them into
+  // 32 multi-subpath elements is the difference between a layer the browser can composite
+  // and one it has to walk.
+  const byStyle = new Map();
+  let length = 0;
+  for (const feature of collection.features || []) {
+    const props = feature.properties || {};
+    const key = `${props.stroke}|${props["stroke-width"]}|${props["stroke-opacity"]}|${props.index}`;
+    let entry = byStyle.get(key);
+    if (!entry) {
+      entry = { props, d: "" };
+      byStyle.set(key, entry);
+    }
+    const line = feature.geometry.coordinates;
+    let previous = null;
+    for (let i = 0; i < line.length; i++) {
+      const [fx, fy] = project(line[i][0], line[i][1]);
+      const x = Math.round(fx * world - ox), y = Math.round(fy * world - oy);
+      entry.d += (i ? "L" : "M") + x + " " + y;
+      if (previous) length += Math.hypot(x - previous[0], y - previous[1]);
+      previous = [x, y];
+    }
+  }
+
+  const minor = svg("g", { class: "minor" });
+  const major = svg("g", { class: "major" });
+  for (const { props, d } of byStyle.values()) {
+    const path = svg("path", {
+      d: d,
+      stroke: props.stroke || "#e08b1e",
+      "stroke-width": props["stroke-width"] || 1,
+      "stroke-opacity": props["stroke-opacity"] ?? 0.8,
+    });
+    (props.index ? major : minor).appendChild(path);
+  }
+  const group = svg("g", null);
+  group.appendChild(minor);
+  group.appendChild(major);
+  contourEl.replaceChildren(group);
+
+  contours.group = group;
+  contours.origin = [ox, oy];
+  // Mean spacing between neighbouring contours: the ground they cross divided by the
+  // length of line crossing it. This is what decides when a 1 m sheet is too dense to
+  // draw in full, and it holds for a 10 m sheet just as well.
+  const metres = worldPixelMetres(bbox, world);
+  const ground = Math.abs(
+    (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]) * 111320 * 110540 *
+    Math.cos((bbox[1] + bbox[3]) / 2 * Math.PI / 180));
+  contours.spacing_m = length > 0 ? ground / (length * metres) : null;
+}
+
+// Metres per world pixel at the reference zoom, at the middle of the sheet.
+function worldPixelMetres(bbox, world) {
+  const lat = (bbox[1] + bbox[3]) / 2;
+  return 40075016.686 * Math.cos(lat * Math.PI / 180) / world;
+}
+
+function renderContours() {
+  contourEl.classList.toggle("street", view.layer === "street");
+  if (!contoursDrawn()) {
+    contourEl.style.display = "none";
+    return;
+  }
+  const { w, h } = viewport();
+  const pixels = pixelsPerWorld();
+  const scale = Math.pow(2, view.zoom - CONTOUR_ZOOM);
+  contourEl.style.display = "";
+  contourEl.setAttribute("width", w);
+  contourEl.setAttribute("height", h);
+  // A path coordinate u lands at u * scale + (origin * scale - centre * pixels + half a
+  // viewport), which is the same mapping `screenOf` makes, folded into one transform.
+  contours.group.setAttribute("transform",
+    `translate(${(contours.origin[0] * scale - view.fx * pixels + w / 2).toFixed(2)} ` +
+    `${(contours.origin[1] * scale - view.fy * pixels + h / 2).toFixed(2)}) scale(${scale})`);
+
+  // Below three pixels apart the lines merge into a wash, so only the index contours are
+  // drawn. On the 1 m sample sheet that is everything up to about a 3 km view.
+  const lat = unproject(view.fx, view.fy)[1];
+  const metresPerPixel = 40075016.686 * Math.cos(lat * Math.PI / 180) / pixels;
+  const sparse = contours.spacing_m != null && contours.spacing_m / metresPerPixel < 3;
+  if (sparse !== contourEl.classList.contains("sparse")) {
+    contourEl.classList.toggle("sparse", sparse);
+    // The legend says whether there are lines being held back, so it follows the zoom.
+    buildLegend();
+  }
+}
+
+async function loadContours() {
+  const file = chosen;
+  contours.loading = true;
+  contours.error = null;
+  syncContourButton();
+  const form = new FormData();
+  form.append("file", file, file.name);
+  try {
+    const response = await fetch(API + "/api/v1/contours", { method: "POST", body: form });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.detail || `HTTP ${response.status}`);
+    // The reader may have picked another file while this was in flight. Drawing the old
+    // one over the new one's catchment would be worse than drawing nothing.
+    if (chosen !== file) return;
+    contours.file = file;
+    contours.meta = body;
+    buildContourLayer(body.geojson);
+    // Before an analysis there is nothing else on the map, so this is also how a reader
+    // finds their sheet without hunting for it.
+    if (!features.length && body.bbox) fitBounds(body.bbox);
+  } catch (error) {
+    contours.error = String(error.message || error);
+    contours.on = false;
+  } finally {
+    contours.loading = false;
+    syncContourButton();
+    buildLegend();
+    render();
+  }
+}
+
+function syncContourButton() {
+  const ready = contours.file === chosen && contours.group !== null;
+  contourButton.disabled = !chosen || contours.loading;
+  contourButton.classList.toggle("on", contoursDrawn());
+  contourButton.classList.toggle("failed", contours.error !== null);
+  // A failure has to be readable without hovering: a button that turns nothing on and
+  // says nothing looks like a broken button rather than an unreadable file.
+  contourButton.querySelector(".txt").textContent =
+    contours.loading ? "Reading" : contours.error ? "No contours" : "Contours";
+  contourButton.title = !chosen
+    ? "Choose a contour map first"
+    : contours.error
+    ? "Could not draw the contours. " + contours.error
+    : contours.on
+    ? "Hide the contour lines"
+    : ready
+    ? "Show the contour lines"
+    : "Draw the contour lines from this file";
+}
+
+function forgetContours() {
+  contours.file = null;
+  contours.on = false;
+  contours.error = null;
+  contours.meta = null;
+  contours.group = null;
+  contours.spacing_m = null;
+  contourEl.replaceChildren();
+}
+
+contourButton.onclick = () => {
+  if (!chosen || contours.loading) return;
+  contours.on = !contours.on;
+  if (contours.on && contours.file !== chosen) {
+    loadContours();
+  } else {
+    syncContourButton();
+    buildLegend();
+    render();
+  }
+};
+
 /* ---- the GeoJSON overlay ---- */
 function ringPath(ring) {
   let d = "";
@@ -817,6 +1065,11 @@ function renderOverlay() {
   overlayEl.setAttribute("height", h);
   overlayEl.replaceChildren();
 
+  // With contours underneath, the catchment fill stops being the thing that shows where
+  // the ground is and starts being the thing hiding it. So the fills step back and the
+  // outlines, which are what a reader is comparing against the ridges, do not.
+  const wash = contoursDrawn() ? 0.45 : 1;
+
   let selectedLabel = null;
 
   for (const feature of drawOrder(features)) {
@@ -850,7 +1103,7 @@ function renderOverlay() {
         "fill-rule": "evenodd",
         fill: props.fill || "#a6cee3",
         "fill-opacity": catchment
-          ? (selected ? 0.42 : hovered ? 0.3 : 0.16)
+          ? (selected ? 0.42 : hovered ? 0.3 : 0.16) * wash
           : (props["fill-opacity"] ?? 0.55),
         stroke: catchment && !selected && !hovered ? "#cfe6f5" : (props.stroke || "#1f78b4"),
         "stroke-width": width,
@@ -1006,6 +1259,7 @@ function render() {
   frame = requestAnimationFrame(() => {
     frame = null;
     renderTiles();
+    renderContours();
     renderOverlay();
     renderScale();
     updateRainButton();
@@ -1092,7 +1346,10 @@ function zoomBy(delta, px, py) {
 
 document.getElementById("zoom-in").onclick = () => zoomBy(1);
 document.getElementById("zoom-out").onclick = () => zoomBy(-1);
-document.getElementById("zoom-fit").onclick = () => { if (lastBBox) fitBounds(lastBBox); };
+document.getElementById("zoom-fit").onclick = () => {
+  const bbox = lastBBox || (contoursDrawn() ? contours.meta.bbox : null);
+  if (bbox) fitBounds(bbox);
+};
 for (const button of document.querySelectorAll("#layers button")) {
   button.onclick = () => {
     view.layer = button.dataset.layer;
@@ -1421,27 +1678,46 @@ function renderResults(body, refit) {
 
   features = body.geojson.features || [];
   lastBBox = body.geojson.bbox || null;
-  buildLegend(true);
+  buildLegend();
   if (refit && lastBBox) fitBounds(lastBBox); else render();
 }
 
-function buildLegend(visible) {
+function buildLegend() {
   const legend = document.getElementById("legend");
-  legend.hidden = !visible;
-  if (!visible) return;
+  legend.hidden = !features.length && !contoursDrawn();
+  if (legend.hidden) return;
   legend.replaceChildren(h("h4", { text: "On the map" }));
-  const entries = [
-    ["The catchment you picked", "#a6cee3", "sw", "solid #1f78b4"],
-    ["The other catchments", "#a6cee3", "sw faint", "dashed #4b6b80"],
-    ["Water in the pond", "#3182bd", "sw", "solid #08519c"],
-    ["Longest path water takes", null, "sw line", null],
-    ["Pond site", "#08519c", "sw dot", null],
-  ];
-  for (const [label, colour, cls, border] of entries) {
+
+  const row = (label, colour, cls, border) => {
     const swatch = h("div", { class: cls });
     if (colour) swatch.style.background = colour;
     if (border) swatch.style.border = "1.5px " + border;
     legend.appendChild(h("div", { class: "lrow" }, [swatch, h("span", { text: label })]));
+  };
+
+  if (features.length) {
+    row("The catchment you picked", "#a6cee3", "sw", "solid #1f78b4");
+    row("The other catchments", "#a6cee3", "sw faint", "dashed #4b6b80");
+    row("Water in the pond", "#3182bd", "sw", "solid #08519c");
+    row("Longest path water takes", null, "sw line", null);
+    row("Pond site", "#08519c", "sw dot", null);
+  }
+
+  if (contoursDrawn()) {
+    // The ramp is the only thing on the map that says which way is uphill, so the
+    // legend has to carry the two numbers that anchor it.
+    const meta = contours.meta;
+    const [low, high] = meta.elevation_range_m;
+    row(`Contours, ${num(low)} to ${num(high)} m`,
+        "linear-gradient(to right, #a8500f, #e08b1e, #ffd166)", "sw", null);
+    const detail = meta.interval_m
+      ? `Every ${num(meta.interval_m, 2)} m` +
+        (meta.index_interval_m ? `, heavier every ${num(meta.index_interval_m, 2)} m` : "")
+      : `${NUM.format(meta.level_count)} levels`;
+    legend.appendChild(h("div", { class: "sub", text: detail }));
+    if (contourEl.classList.contains("sparse")) {
+      legend.appendChild(h("div", { class: "sub", text: "Zoom in for the lines between." }));
+    }
   }
 }
 
@@ -1459,6 +1735,10 @@ function size(bytes) {
 
 function chooseFile(file) {
   chosen = file;
+  forgetContours();
+  syncContourButton();
+  buildLegend();
+  render();
   dropEl.classList.add("ready");
   dropEl.replaceChildren(
     h("strong", { text: "Ready to go" }),
@@ -1508,7 +1788,7 @@ runButton.onclick = async () => {
   runButton.disabled = true;
   resultsEl.replaceChildren();
   features = [];
-  buildLegend(false);
+  buildLegend();
   render();
 
   const started = Date.now();
@@ -1582,6 +1862,7 @@ resultsEl.appendChild(h("div", { class: "block" }, [
 // ocean while it waits for a file.
 fitBounds([78.0, 19.0, 84.0, 24.0]);
 updateRainButton();
+syncContourButton();
 </script>
 </body>
 </html>

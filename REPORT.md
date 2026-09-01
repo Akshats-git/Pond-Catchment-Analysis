@@ -23,13 +23,14 @@ curl -F file=@data/contours_1m.kml http://10.1.75.53:5229/api/v1/analyzeContour
 ## 1. What was built
 
 A FastAPI service that turns a contour sheet into a costed pond proposal. One endpoint
-does the work; two more exist so a client can check liveness and look up rainfall on its
-own.
+does the work; three more exist so a client can draw the input, check liveness and look
+up rainfall on its own.
 
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/api/v1/analyzeContour` | Contour map in; site, catchment, storage and yield out |
 | `POST` | `/api/v1/findCatchment` | Alias, identical signature |
+| `POST` | `/api/v1/contours` | The uploaded sheet back as drawable lines, so the answer can be checked against the ground it claims |
 | `GET` | `/api/v1/rainfall` | Ten years of daily rainfall for a point |
 | `GET` | `/health` | Liveness |
 
@@ -290,6 +291,17 @@ carries three: the skipped contour line, the fact that ERA5 reanalysis spreads r
 more days than a village gauge would record (so the yield is conservative), and the fact
 that a 1 m contour interval bounds how precise any depth can possibly be. They are part
 of the answer.
+
+**`/contours` is there so the answer can be disbelieved.** A catchment boundary drawn on
+satellite imagery is not checkable: imagery does not show where the ridges are, and a
+boundary is right precisely when it runs along them. The endpoint hands the uploaded
+sheet's own lines back as a styled `FeatureCollection` — same parser, so the same lines
+the analysis read — thinned to 1.5 m, which is three quarters of the finest grid the
+service will ever build and therefore finer than any disagreement the analysis could
+resolve. On the sample that is 159,113 vertices down to 30,538, 160 kB gzipped, in about
+half a second against the analysis's fifteen. The demo page's **Contours** toggle is this
+endpoint, and with it on the catchment stops being a claim and becomes something a reader
+can check.
 
 ---
 

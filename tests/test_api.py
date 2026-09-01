@@ -38,6 +38,7 @@ from tests.fixtures.make_synthetic import VALLEY
 SAMPLE = "data/contours_1m.kml"
 ENDPOINT = f"{settings.api.api_prefix}/analyzeContour"
 ALIAS = f"{settings.api.api_prefix}/findCatchment"
+CONTOURS = f"{settings.api.api_prefix}/contours"
 
 VALLEY_KML = VALLEY.to_kml()
 
@@ -560,3 +561,129 @@ def test_ensemble_is_refused_when_the_host_cannot_afford_it(client: TestClient, 
 
     # The point of refusing: the very next request still works.
     assert post(client, VALLEY_KML, ensemble=False).status_code == 200
+
+
+# --------------------------------------------------------------------------- #
+# The contour overlay
+#
+# `/contours` exists for one reason: a catchment boundary on satellite imagery cannot be
+# checked by eye, because imagery does not show where the ridges are. So what these tests
+# hold it to is that the lines it draws are the same lines the analysis read, and that it
+# is cheap enough to ask for while the reader is still filling in the panel.
+# --------------------------------------------------------------------------- #
+def test_contours_come_back_as_a_drawable_collection(client: TestClient) -> None:
+    body = post(client, VALLEY_KML, url=CONTOURS).json()
+    collection = body["geojson"]
+
+    assert body["status"] == "ok"
+    assert collection["type"] == "FeatureCollection"
+    assert len(collection["features"]) == body["contour_count"] > 0
+    assert len(collection["bbox"]) == 4
+    for feature in collection["features"]:
+        assert feature["geometry"]["type"] == "LineString"
+        assert isinstance(feature["properties"]["elevation_m"], float)
+        assert feature["properties"]["stroke"].startswith("#")
+
+
+def test_the_lines_drawn_are_the_lines_analysed(client: TestClient) -> None:
+    """The whole value of the overlay is that it is the same reading of the file. Two
+    parses of one sheet that disagreed on how many lines are in it would make the picture
+    a second opinion rather than evidence."""
+    drawn = post(client, VALLEY_KML, url=CONTOURS).json()
+    analysed = post(client, VALLEY_KML, ensemble=False).json()["input"]
+
+    assert drawn["contour_count"] == analysed["contour_count"]
+    assert drawn["source_vertex_count"] == analysed["vertex_count"]
+    assert drawn["elevation_source"] == analysed["elevation_source"]
+    assert drawn["interval_m"] == analysed["interval_m"]
+    assert drawn["elevation_range_m"] == analysed["elevation_range_m"]
+    assert drawn["bbox"] == analysed["bbox"]
+
+
+def test_the_overlay_is_thinned_and_says_by_how_much(client: TestClient) -> None:
+    body = post(client, VALLEY_KML, url=CONTOURS).json()
+    assert body["vertex_count"] <= body["source_vertex_count"]
+    assert body["simplify_tolerance_m"] == settings.geojson.contour_simplify_tolerance_m
+    # Below the finest grid the service will ever build, so the overlay cannot disagree
+    # with the catchment by more than the analysis could resolve anyway.
+    assert body["simplify_tolerance_m"] < settings.dem.min_resolution_m
+
+
+def test_simplification_is_the_clients_to_choose(client: TestClient) -> None:
+    coarse = post(client, VALLEY_KML, url=CONTOURS, simplify_m=20).json()
+    exact = post(client, VALLEY_KML, url=CONTOURS, simplify_m=0).json()
+    assert coarse["vertex_count"] < exact["vertex_count"]
+    assert exact["vertex_count"] == exact["source_vertex_count"]
+    assert coarse["simplify_tolerance_m"] == 20.0
+
+
+def test_an_impossible_simplification_is_422(client: TestClient) -> None:
+    refused = post(client, VALLEY_KML, url=CONTOURS, simplify_m=-1)
+    assert refused.status_code == 422
+    assert refused.json()["code"] == "invalid_simplify"
+
+
+def test_a_file_with_no_contours_fails_the_same_way_here(client: TestClient) -> None:
+    """One parser, so one error envelope and one code, whichever endpoint was asked."""
+    refused = post(client, b"<kml><Document/></kml>", url=CONTOURS)
+    assert refused.status_code == 400
+    body = refused.json()
+    assert body["status"] == "error" and body["code"] == "no_contours"
+    assert body["hint"]
+
+
+def test_drawing_the_contours_is_far_cheaper_than_analysing_them(client: TestClient) -> None:
+    """The reason this is its own endpoint rather than a flag on the analysis. It has to
+    answer while a reader is still typing, and it has to not put a megabyte of coordinates
+    on every analysis response that will never draw them."""
+    drawn = post(client, VALLEY_KML, url=CONTOURS).json()
+    analysed = post(client, VALLEY_KML, ensemble=False).json()
+
+    assert drawn["timing_ms"]["total"] < analysed["timing_ms"]["total"]
+    assert set(drawn["timing_ms"]) == {"parse", "draw", "total"}
+    assert "geojson" not in str(analysed["input"])
+    roles = {f["properties"]["role"] for f in analysed["geojson"]["features"]}
+    assert "contour" not in roles
+
+
+def test_the_sample_sheet_draws_within_the_vertex_budget(client: TestClient) -> None:
+    """The real file, which is where the size question actually bites: 159,113 vertices
+    in, and a response a browser can hold."""
+    with open(SAMPLE, "rb") as handle:
+        body = post(client, handle.read(), name="contours_1m.kml", url=CONTOURS).json()
+
+    assert body["source_vertex_count"] > 100_000
+    assert body["vertex_count"] <= settings.geojson.contour_max_vertices
+    assert body["vertex_count"] < body["source_vertex_count"] / 4
+    assert body["interval_m"] == 1.0
+    assert body["index_interval_m"] == 5.0
+    heavy = [f for f in body["geojson"]["features"] if f["properties"]["index"]]
+    assert heavy and all(f["properties"]["elevation_m"] % 5 == 0 for f in heavy)
+
+
+def test_a_megabyte_of_contours_travels_compressed(client: TestClient) -> None:
+    """Uncompressed, the sample's overlay is about a megabyte, which is a visible wait on
+    a village connection. It is the one response on this service big enough to care."""
+    with open(SAMPLE, "rb") as handle:
+        payload = handle.read()
+    response = client.post(
+        CONTOURS,
+        files={"file": ("contours_1m.kml", payload, "application/vnd.google-earth.kml+xml")},
+        headers={"Accept-Encoding": "gzip"},
+    )
+    assert response.status_code == 200
+    assert response.headers.get("content-encoding") == "gzip"
+
+
+def test_openapi_documents_the_contour_endpoint(client: TestClient) -> None:
+    schema = client.get("/openapi.json").json()
+    operation = schema["paths"][CONTOURS]["post"]
+    assert {"400", "413", "422"} <= set(operation["responses"])
+
+
+def test_the_demo_page_can_turn_the_contours_on(client: TestClient) -> None:
+    """The map is where this feature is actually used, and the page is one static file
+    with no build step, so the wiring is checkable by reading it."""
+    page = client.get("/static/index.html").text
+    assert 'id="contour-toggle"' in page
+    assert '/api/v1/contours' in page

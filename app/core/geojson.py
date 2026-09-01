@@ -37,7 +37,9 @@ from app.config import GeoJSONConfig, settings
 from app.core.catchment import Catchment
 from app.core.dem_builder import DEM
 from app.core.hydrology import StageStorage, WaterBalance
+from app.core.kml_parser import ContourSet
 from app.core.pond_siting import PondSite
+from app.core.projection import projection_for
 from app.core.terrain import FlowField
 
 __all__ = [
@@ -52,6 +54,8 @@ __all__ = [
     "outlet_feature",
     "flow_path_feature",
     "site_features",
+    "ContourDrawing",
+    "contour_drawing",
     "feature_collection",
     "build_geojson",
 ]
@@ -528,6 +532,168 @@ def site_features(
                 features.append(pond)
     features.append(outlet_feature(site, balance))
     return features
+
+
+# --------------------------------------------------------------------------- #
+# Contours
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class ContourDrawing:
+    """The input contours as something a map can draw over the answer.
+
+    The point of handing these back is a check no number can make for the reader: a
+    catchment boundary is right when it runs along the ridges, and that is visible in one
+    glance with the contours underneath it and invisible without them.
+    """
+
+    geojson: dict
+    tolerance_m: float
+    """Simplification actually applied, which is the requested one unless the vertex
+    budget forced it up."""
+
+    vertex_count: int
+    warnings: tuple[str, ...] = ()
+
+
+def _ramp_colour(fraction: float, ramp: tuple[str, str, str]) -> str:
+    """A colour off the three-stop elevation ramp, linearly interpolated in sRGB.
+
+    sRGB rather than a perceptual space because the stops are already close together in
+    lightness: the ramp says "how high", and the *interval* between the lines says how
+    steep, so nothing here depends on the ramp being perceptually uniform.
+    """
+    fraction = min(max(fraction, 0.0), 1.0)
+    lower = fraction < 0.5
+    low, high = (ramp[0], ramp[1]) if lower else (ramp[1], ramp[2])
+    t = fraction * 2.0 if lower else fraction * 2.0 - 1.0
+
+    def channel(index: int) -> int:
+        a = int(low[1 + 2 * index : 3 + 2 * index], 16)
+        b = int(high[1 + 2 * index : 3 + 2 * index], 16)
+        return round(a + (b - a) * t)
+
+    return "#%02x%02x%02x" % (channel(0), channel(1), channel(2))
+
+
+def _index_levels(levels: tuple[float, ...], interval: float | None, every: int) -> set:
+    """Which contour levels print heavy.
+
+    Every nth level counted off a round multiple of the interval, not off the lowest line
+    in the file: a sheet clipped to start at 267 m should still make 270 and 275 the heavy
+    lines, because those are the numbers a reader expects to be heavy.
+    """
+    if interval is None or interval <= 0.0 or every <= 1:
+        return set()
+    step = interval * every
+    return {
+        level
+        for level in levels
+        if abs(level - round(level / step) * step) < interval * 0.25
+    }
+
+
+def contour_drawing(
+    contours: ContourSet,
+    *,
+    tolerance_m: float | None = None,
+    config: GeoJSONConfig | None = None,
+) -> ContourDrawing:
+    """Every contour line in the file as a styled `LineString`, thinned for a browser.
+
+    Thinning happens in projected metres, and the default tolerance is three quarters of
+    the finest grid this service will ever build, so what is drawn and what was analysed
+    are the same lines to within a fraction of a cell. A client that wants the file
+    exactly can ask for no thinning at all.
+
+    Colour carries the elevation, because a line on its own cannot: without it a reader
+    sees nested loops and has no way to tell a hill from a hollow. Every nth line is drawn
+    heavy, which is how a printed sheet says the same thing.
+    """
+    cfg = config or settings.geojson
+    if contours.line_count == 0:
+        raise GeoJSONError(
+            "no_contours",
+            "There are no contour lines to draw.",
+            "Upload a sheet with contour geometry in it.",
+        )
+
+    requested = cfg.contour_simplify_tolerance_m if tolerance_m is None else tolerance_m
+    requested = max(0.0, float(requested))
+    tolerance = requested
+    precision = cfg.coordinate_precision
+    metadata = contours.metadata
+    low, high = metadata.elevation_range
+    span = high - low
+    index_levels = _index_levels(
+        metadata.levels, metadata.interval_m, cfg.contour_index_every
+    )
+
+    # One projection for the whole sheet, built off every vertex, so simplification is in
+    # metres everywhere rather than in degrees that mean different distances by latitude.
+    projection = projection_for(contours.points)
+    xy = projection.forward(contours.points)
+    elevations = contours.line_elevations
+
+    warnings: list[str] = []
+    for attempt in range(_MAX_TOLERANCE_DOUBLINGS + 1):
+        # Elevation travels with its line rather than being looked up by index later: a
+        # line thinned below two points is dropped, and a positional lookup would then
+        # hand every line after it the wrong height.
+        lines: list[tuple[list, float]] = []
+        total = 0
+        for index in range(contours.line_count):
+            start, end = contours.line_starts[index], contours.line_starts[index + 1]
+            points = [(float(x), float(y)) for x, y in xy[start:end]]
+            thinned = simplify(points, tolerance) if tolerance > 0.0 else points
+            # Two points is still a line; anything less is not drawable.
+            if len(thinned) < 2:
+                continue
+            lines.append((thinned, float(elevations[index])))
+            total += len(thinned)
+        if total <= cfg.contour_max_vertices or attempt == _MAX_TOLERANCE_DOUBLINGS:
+            break
+        tolerance = tolerance * 2.0 if tolerance > 0.0 else 1.0
+    if tolerance > requested:
+        warnings.append(
+            f"The contour overlay was thinned to {tolerance:.1f} m to stay under "
+            f"{cfg.contour_max_vertices:,} vertices. The lines are the ones in the file; "
+            "they are drawn with fewer points."
+        )
+
+    features: list[dict] = []
+    for thinned, elevation in lines:
+        is_index = elevation in index_levels
+        features.append(
+            _feature(
+                {
+                    "type": "LineString",
+                    "coordinates": [
+                        [round(float(lon), precision), round(float(lat), precision)]
+                        for lon, lat in projection.inverse(np.asarray(thinned))
+                    ],
+                },
+                {
+                    "role": "contour",
+                    "elevation_m": round(float(elevation), 2),
+                    "index": is_index,
+                    # simplestyle again, so the overlay draws the same in this service's
+                    # demo page and in geojson.io. Index lines are heavier and more solid,
+                    # which is the convention a printed sheet uses to say the same thing.
+                    "stroke": _ramp_colour(
+                        (elevation - low) / span if span > 0.0 else 0.5, cfg.contour_ramp
+                    ),
+                    "stroke-width": 1.6 if is_index else 0.8,
+                    "stroke-opacity": 0.95 if is_index else 0.7,
+                },
+            )
+        )
+
+    return ContourDrawing(
+        geojson=feature_collection(features, bbox=metadata.bbox),
+        tolerance_m=round(tolerance, 2),
+        vertex_count=sum(len(line) for line, _ in lines),
+        warnings=tuple(warnings),
+    )
 
 
 def feature_collection(features: list[dict], *, bbox: tuple | None = None) -> dict:

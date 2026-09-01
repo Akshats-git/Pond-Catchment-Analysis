@@ -389,6 +389,30 @@ class GeoJSONConfig:
     """Decimal places in the lon/lat written out. Six is about 0.1 m, finer than any
     grid this service builds."""
 
+    contour_simplify_tolerance_m: float = 1.5
+    """Douglas-Peucker tolerance for the contour lines drawn back to a client, in metres.
+
+    Three quarters of `DEMConfig.min_resolution_m`, which is `simplify_tolerance_cells`
+    applied to the finest grid this service will ever build: under that, a moved vertex
+    cannot cross into a neighbouring cell of even the finest analysis, so the overlay and
+    the catchment drawn over it cannot disagree by anything the analysis could resolve.
+    On the sample sheet it turns 159,113 vertices into 30,538, which is a 3.8 MB response
+    into a 0.9 MB one, or 160 kB over the wire once gzipped."""
+
+    contour_max_vertices: int = 200_000
+    """Cap on the whole contour overlay. Tolerance doubles until it fits, and the
+    response says which tolerance it settled on."""
+
+    contour_index_every: int = 5
+    """Every nth contour level is an index contour: drawn heavier, the way a topographic
+    sheet prints them, so the shape of the ground reads without labels."""
+
+    contour_ramp: tuple[str, str, str] = ("#a8500f", "#e08b1e", "#ffd166")
+    """Low, middle and high stops of the elevation ramp the contours are coloured by.
+    Warm on purpose: the catchment is blue and the flow path is red, so contours need a
+    third hue, and these three sit in a lightness band that reads on satellite imagery
+    and on a white street map alike."""
+
 
 # --------------------------------------------------------------------------- #
 # API

@@ -64,7 +64,9 @@ uvicorn app.main:app --reload
 
 Open `http://localhost:8000` for the demo page. Drop the sample map on it and the
 catchment is drawn over satellite imagery. Click any candidate to highlight the ground it
-covers. Interactive API documentation is at `http://localhost:8000/docs`.
+covers. Turn **Contours** on and the sheet's own lines are drawn underneath, which is how
+you check that a boundary follows the ridges rather than taking it on trust. Interactive
+API documentation is at `http://localhost:8000/docs`.
 
 ```bash
 curl -F file=@data/contours_1m.kml http://localhost:8000/api/v1/analyzeContour
@@ -76,6 +78,13 @@ plus optional `grid_resolution`, `top_n`, `lat`, `lon`, `curve_number`, `rainfal
 catchment with an error bar, the stage-storage curve, the yearly runoff, and a GeoJSON
 `FeatureCollection` that loads straight into geojson.io. Errors always come back as
 `{"status": "error", "code", "detail", "hint"}`.
+
+`POST /api/v1/contours` takes the same file and hands the contour lines straight back as
+a styled `FeatureCollection`, without analysing anything. It runs the same parser, so the
+lines it draws are the lines the analysis read, and it answers in well under a second
+because it stops there. This is what the demo page's contour layer is, and it is worth
+having on its own: it is the only way to see the ground a catchment boundary is claiming
+about.
 
 ## Layout
 

@@ -4,12 +4,13 @@ Base URL of the running service: **`http://10.1.75.53:5229`**
 Interactive documentation, generated from the same models that serialise the responses:
 **`http://10.1.75.53:5229/docs`**
 
-Three endpoints, plus an alias. Everything is `multipart/form-data` in and JSON out.
+Four endpoints, plus an alias. Everything is `multipart/form-data` in and JSON out.
 
 | Method | Path | What it does |
 |---|---|---|
 | `POST` | `/api/v1/analyzeContour` | Contour map in, pond site + catchment + yield out |
 | `POST` | `/api/v1/findCatchment` | Alias of the above, identical signature |
+| `POST` | `/api/v1/contours` | The same map back as drawable lines, without analysing it |
 | `GET` | `/api/v1/rainfall` | Ten years of daily rainfall for one point |
 | `GET` | `/health` | Liveness. Does no work on purpose |
 
@@ -130,6 +131,103 @@ print(s["location"], s["catchment"]["area_ha"], "ha", s["runoff"]["annual_runoff
 
 ---
 
+## POST /api/v1/contours
+
+The contour lines in an uploaded sheet, styled and thinned for a map. No analysis: this
+is the parser and nothing else, so it answers in about half a second on the sample sheet
+where `/analyzeContour` takes several.
+
+It exists because a catchment boundary drawn on satellite imagery cannot be checked by
+eye. Imagery does not show where the ridges are, and a boundary is right when it runs
+along them. Ask for the contours, lay the catchment over them, and the answer can be read
+rather than taken on trust. The demo page's **Contours** toggle is this endpoint.
+
+Both endpoints run the same parser, so the lines drawn are the lines analysed: on one
+file, `contour_count`, `bbox`, `interval_m` and `elevation_range_m` match
+`/analyzeContour`'s `input` block exactly.
+
+### Request
+
+| Field | Type | Required | Default | Notes |
+|---|---|---|---|---|
+| `file` | file | yes | — | `.kml` or `.kmz`, the same file `/analyzeContour` takes |
+| `simplify_m` | float | no | `1.5` | How far a drawn line may depart from the one in the file. `0` sends every vertex. 0 to 1000 |
+
+The default is three quarters of the finest grid the service will ever build, so the
+overlay cannot disagree with a catchment drawn over it by anything the analysis could
+resolve. On the sample sheet it turns 159,113 vertices into 30,538: 0.9 MB of JSON, 160 kB
+gzipped, which is what the service sends.
+
+### Response, 200
+
+```json
+{
+  "status": "ok",
+  "filename": "contours_1m.kml",
+  "contour_count": 1355,
+  "vertex_count": 30538,
+  "source_vertex_count": 159113,
+  "simplify_tolerance_m": 1.5,
+  "elevation_source": "placemark_name",
+  "interval_m": 1.0,
+  "level_count": 32,
+  "elevation_range_m": [267.0, 298.0],
+  "index_interval_m": 5.0,
+  "bbox": [81.281404, 21.239822, 81.312647, 21.263581],
+  "geojson": { "type": "FeatureCollection", "bbox": [...], "features": [...] },
+  "warnings": [],
+  "timing_ms": {"parse": 316.0, "draw": 350.9, "total": 667.1}
+}
+```
+
+Every feature is a `LineString`:
+
+```json
+{
+  "type": "Feature",
+  "geometry": {"type": "LineString", "coordinates": [[81.2903, 21.2511], ...]},
+  "properties": {
+    "role": "contour",
+    "elevation_m": 280.0,
+    "index": true,
+    "stroke": "#e08b1e",
+    "stroke-width": 1.6,
+    "stroke-opacity": 0.95
+  }
+}
+```
+
+`index` marks the heavy lines a topographic sheet prints every fifth level, counted off a
+round multiple of the interval rather than off the lowest line in the file, so a sheet
+starting at 267 m still makes 270 and 275 the heavy ones. `stroke` comes off an elevation
+ramp, dark at the bottom of the sheet and pale at the top: without it a reader sees nested
+loops with no way to tell a hill from a hollow. They are simplestyle properties, so the
+collection draws the same in the demo page and in geojson.io.
+
+`vertex_count` is what was drawn; `source_vertex_count` is what was in the file. If a
+sheet is large enough that even the requested tolerance would blow the vertex budget, the
+service thins further, reports the tolerance it settled on, and says so in `warnings`.
+
+### curl
+
+```bash
+# The overlay, at the default thinning.
+curl -X POST -F "file=@data/contours_1m.kml" \
+     http://10.1.75.53:5229/api/v1/contours -o contours.geojson
+
+# Every vertex in the file, nothing dropped.
+curl -X POST -F "file=@data/contours_1m.kml" -F "simplify_m=0" \
+     http://10.1.75.53:5229/api/v1/contours
+
+# Just the shape of the answer.
+curl -s -X POST -F "file=@data/contours_1m.kml" \
+     http://10.1.75.53:5229/api/v1/contours \
+  | python3 -c 'import json,sys; b=json.load(sys.stdin); \
+print(b["contour_count"], "lines,", b["level_count"], "levels,", b["vertex_count"], "points")'
+```
+
+---
+
 ## GET /api/v1/rainfall
 
 Ten years of daily rainfall for one point, averaged to a year. The same feed
@@ -238,13 +336,20 @@ default: the request could not be analysed.
 ## Notes for a client
 
 - **Timing.** A full analysis of the 831 ha sample takes about **15 s** on the container
-  with the ensemble off, about 10 s locally with it on. `/health` and `/rainfall` are
-  immediate. Set a client timeout above 120 s, which is the server's own limit.
+  with the ensemble off, about 10 s locally with it on. `/contours` on the same file takes
+  well under a second; `/health` and `/rainfall` are immediate. Set a client timeout above
+  120 s, which is the server's own limit.
 - **Concurrency.** The analysis runs in a worker thread, so a long request never blocks
   `/health`. Analyses themselves run **one at a time** and further ones queue: two at once
   need more than a gigabyte, which a 512 MB container does not survive. Three concurrent
   uploads of the sample returned 200 in 15 s, 27 s and 39 s. A queue that cannot clear
   inside the 120 s limit gets the usual 504, so waiting is bounded, never indefinite.
+  `/contours` is not in that queue: it holds the parsed file and nothing else, so it can
+  answer while an analysis is running, which is what lets a page draw the sheet first and
+  the catchment when it arrives.
+- **Responses are gzipped** above 2 kB when the client sends `Accept-Encoding: gzip`. It
+  matters for one of them: the sample sheet's contour overlay is 0.9 MB of coordinates and
+  160 kB compressed.
 - **CORS** is open for `GET`, `POST` and `OPTIONS`, so a browser page on another origin
   can call this directly.
 - **Warnings are not errors.** A 200 response with a `warnings` array is a complete

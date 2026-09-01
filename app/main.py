@@ -15,6 +15,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -75,6 +76,11 @@ def create_app() -> FastAPI:
         description=DESCRIPTION,
         docs_url=settings.api.docs_url,
     )
+
+    # The contour overlay is about a megabyte of coordinates and compresses to a fifth
+    # of that, which is the difference between an instant layer and a visible wait on a
+    # village connection. Below the threshold the header costs more than it saves.
+    app.add_middleware(GZipMiddleware, minimum_size=2048)
 
     app.add_middleware(
         CORSMiddleware,
