@@ -39,11 +39,11 @@ configured default, and the defaults are what the sample run in
 | `target_depth_m` | float | 3.0 | How deep the pond is to be built |
 | `ensemble` | bool | see note | Re-trace each site on three more grids for an error bar |
 
-> **`ensemble` on this deployment.** The container is capped at 512 MB of memory and the
-> four-grid ensemble peaks at 581 MB, so it is switched off by default here with
-> `POND_API_DEFAULT_ENSEMBLE=false`. Sending `ensemble=true` will exceed the cap; the
-> service restarts itself within about two seconds, but that one request fails. Off the
-> container the default is on. See [REPORT.md §7](../REPORT.md).
+> **`ensemble` on this deployment.** The container is capped at 512 MB and the four-grid
+> ensemble peaks at 581 MB, so it is switched off here — `POND_API_DEFAULT_ENSEMBLE=false`
+> for the default, and `POND_API_ALLOW_ENSEMBLE=false` so that an explicit `ensemble=true`
+> comes back as a `422 ensemble_unavailable` rather than being attempted. Off the
+> container both default to on. See [REPORT.md §7](../REPORT.md).
 
 ### Response, 200
 
@@ -222,6 +222,7 @@ file has to change.
 | `no_buildable_ground` | Nothing on the sheet is flat enough to build on |
 | `no_ground_clear_of_watercourse` | Every candidate stands in or too near a watercourse |
 | `no_site_found` | The search finished with nothing that satisfies every rule |
+| `ensemble_unavailable` | `ensemble=true` on a host without the memory for it (this deployment) |
 
 The last few are not malformed requests, but to a client they are the same thing: nothing
 about the file changes, and only a different ask can help.
@@ -239,8 +240,11 @@ default: the request could not be analysed.
 - **Timing.** A full analysis of the 831 ha sample takes about **15 s** on the container
   with the ensemble off, about 10 s locally with it on. `/health` and `/rainfall` are
   immediate. Set a client timeout above 120 s, which is the server's own limit.
-- **Concurrency.** The analysis runs in a worker thread, so a long request does not block
-  `/health` or anyone else's.
+- **Concurrency.** The analysis runs in a worker thread, so a long request never blocks
+  `/health`. Analyses themselves run **one at a time** and further ones queue: two at once
+  need more than a gigabyte, which a 512 MB container does not survive. Three concurrent
+  uploads of the sample returned 200 in 15 s, 27 s and 39 s. A queue that cannot clear
+  inside the 120 s limit gets the usual 504, so waiting is bounded, never indefinite.
 - **CORS** is open for `GET`, `POST` and `OPTIONS`, so a browser page on another origin
   can call this directly.
 - **Warnings are not errors.** A 200 response with a `warnings` array is a complete

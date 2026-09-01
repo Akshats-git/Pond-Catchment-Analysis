@@ -410,8 +410,33 @@ class APIConfig:
     """Run the 3-grid resolution ensemble by default (~12 s vs ~4 s without). The error
     bar is worth the latency; clients can opt out per request."""
 
+    allow_ensemble: bool = True
+    """Whether this host can afford the ensemble at all.
+
+    Separate from `default_ensemble`, because "off unless you ask" and "not available
+    here" are different answers and a client deserves to be told which one it got. The
+    ensemble peaks near 580 MB. On a host with less than that, `default_ensemble=false`
+    alone is not enough: a client that reads `/docs` and sends `ensemble=true` gets the
+    worker OOM-killed and an empty reply, which looks like a broken service rather than a
+    host limit. With this false, the same request gets a 422 that says so, and the service
+    stays up. Set `POND_API_ALLOW_ENSEMBLE=false` where the memory is not there."""
+
     request_timeout_s: float = 120.0
     """Upper bound on a single analysis before the request is abandoned."""
+
+    max_concurrent_analyses: int = 1
+    """How many analyses may run at once. Further requests queue rather than start.
+
+    This is a memory bound, not a throughput knob. One analysis of an 831 ha sheet peaks
+    near 300 MB, and the 4-grid ensemble near 580 MB, so two at once need more than a
+    gigabyte. Run unbounded on a 512 MB container and the second concurrent request does
+    not slow the first down, it gets both of them OOM-killed along with the worker they
+    share. Queueing turns that into a wait.
+
+    Serialising costs little even where the memory exists: the analysis is several seconds
+    of numpy holding the GIL in places, so a second one in parallel was never getting a
+    whole core to itself. Raise it with `POND_API_MAX_CONCURRENT_ANALYSES` on a host with
+    the memory to back it."""
 
 
 # --------------------------------------------------------------------------- #

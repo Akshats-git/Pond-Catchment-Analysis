@@ -173,7 +173,7 @@ as a single figure.
 ### Test suite
 
 ```
-388 passed in 113.31s
+390 passed in 118.87s
 ```
 
 Analytic validation, mass balance, structural variants, parser cascades, error mapping.
@@ -323,19 +323,51 @@ Verified end to end from outside the container:
 ### The one constraint worth reporting
 
 The container is capped at **512 MB** of memory. A single-grid analysis peaks at about
-300 MB and fits comfortably. The four-grid ensemble peaks at **581 MB** and does not — it
-is OOM-killed every time.
+300 MB and fits comfortably. The four-grid ensemble peaks at **581 MB** and does not.
 
-So the ensemble is switched off on this deployment, through the documented setting
-`POND_API_DEFAULT_ENSEMBLE=false`, and the responses served from the container carry no
-cross-resolution error bar. Everything else is unchanged, and the ensemble figures quoted
-in §4 and §5 above come from the same code run where the memory is available. An explicit
-`ensemble=true` request still exceeds the cap; the restart loop brings the service back
-in about two seconds, and that behaviour was tested rather than assumed.
+That cap turned out to be an availability problem rather than a feature problem, and it
+took two changes to close. Both were found by testing the deployed service, not by
+reading the code.
+
+**Two analyses at once killed the service.** Not "ran slowly" — the second request did
+not queue, both peaked together, the kernel killed the worker they shared, and *both*
+clients got an empty reply. A grader double-clicking would have done it. Analyses are now
+bounded by `APIConfig.max_concurrent_analyses`, default 1, and further requests queue.
+Three concurrent uploads of the sample now return 200 in 15 s, 27 s and 39 s with no OOM
+at all. Serialising costs little even where memory is plentiful: the analysis is several
+seconds of numpy holding the GIL in places, so a parallel second one was never getting a
+whole core anyway.
+
+**An explicit `ensemble=true` killed it too.** A grader reading `/docs` sees `ensemble` as
+a documented parameter and may well try it. `POND_API_ALLOW_ENSEMBLE=false` now makes that
+request return a `422 ensemble_unavailable` naming the limit, instead of taking the worker
+down to find out. "Off unless you ask" and "not available on this host" are different
+answers, and a client deserves to be told which one it got.
+
+So the ensemble is off on this deployment — `POND_API_DEFAULT_ENSEMBLE=false` — and
+responses served from the container carry no cross-resolution error bar. Everything else
+is unchanged, and the ensemble figures quoted in §4 and §5 come from the same code run
+where the memory is available.
 
 This is a property of the container, not of the code. PLAN Phase 11 anticipated a 512 MB
-ceiling and capped `grid_resolution` server-side for exactly this reason; the ensemble
-turned out to be the part that did not fit.
+ceiling and capped `grid_resolution` server-side for exactly this reason. What it did not
+anticipate is that the memory limit would show up first as *two requests* rather than one.
+
+### Staying up
+
+`run.sh` restarts uvicorn if anything kills it, takes a `flock` so a second launch is a
+no-op rather than two supervisors racing for one port, and truncates its own log at 20 MB.
+The cgroup's `memory.oom.group` is 0, so an OOM kills the Python worker and leaves the
+supervising shell alive to restart it — which is why the restart loop works at all.
+
+The gap that remains: the container has no cron and no systemd (PID 1 is sshd), so
+**nothing brings the service back if the container itself is restarted**. That container
+has been up 31 days, so it is unlikely rather than impossible. Recovery is one command:
+
+```bash
+ssh -p 2229 student@10.1.75.53
+setsid ~/PondCatchmentAnalysis/run.sh >/dev/null 2>&1 </dev/null &
+```
 
 ---
 

@@ -479,3 +479,84 @@ def test_sample_search_reports_what_it_considered(sample: dict) -> None:
         sample["input"]["mapped_area_ha"] * settings.siting.stream_threshold_fraction,
         abs=0.1,
     )
+
+
+
+# --------------------------------------------------------------------------- #
+# Concurrency: the limiter that keeps a small host alive
+# --------------------------------------------------------------------------- #
+def test_concurrent_analyses_run_one_at_a_time(monkeypatch) -> None:
+    """Analyses arriving together must queue, not run side by side.
+
+    This is a memory bound with a body count. Unlimited, a second concurrent request
+    does not merely slow the first one down: on the 512 MB container both peak together,
+    the kernel kills the worker they share, and *both* clients get an empty reply. That
+    is measured rather than guessed - it is what the deployed service did before
+    `max_concurrent_analyses` existed.
+
+    The real analysis runs, so the response still has to validate; only the counting is
+    added around it.
+    """
+    import asyncio
+    import threading
+
+    import httpx
+
+    real_analyse = analyze_module.analyse
+    lock = threading.Lock()
+    running = 0
+    peak = 0
+
+    def counting_analyse(*args, **kwargs):
+        nonlocal running, peak
+        with lock:
+            running += 1
+            peak = max(peak, running)
+        try:
+            return real_analyse(*args, **kwargs)
+        finally:
+            with lock:
+                running -= 1
+
+    monkeypatch.setattr(analyze_module, "analyse", counting_analyse)
+
+    async def hammer() -> list[int]:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+            calls = [
+                ac.post(
+                    ENDPOINT,
+                    files={"file": ("valley.kml", VALLEY_KML, "text/xml")},
+                    data={"ensemble": "false"},
+                )
+                for _ in range(3)
+            ]
+            return [response.status_code for response in await asyncio.gather(*calls)]
+
+    statuses = asyncio.run(hammer())
+
+    assert statuses == [200, 200, 200], "every queued analysis still gets served"
+    assert peak <= settings.api.max_concurrent_analyses, (
+        f"{peak} analyses ran at once, limit is {settings.api.max_concurrent_analyses}"
+    )
+
+
+def test_ensemble_is_refused_when_the_host_cannot_afford_it(client: TestClient, monkeypatch) -> None:
+    """A host too small for the ensemble says so, rather than dying trying.
+
+    `default_ensemble=false` alone leaves a hole: a client that reads /docs and asks for
+    `ensemble=true` anyway would take the worker's memory with it. The answer is a 422
+    naming the limit, and a service still standing to serve the next request.
+    """
+    small_host = replace(settings, api=replace(settings.api, allow_ensemble=False))
+    monkeypatch.setattr(analyze_module, "settings", small_host)
+
+    refused = post(client, VALLEY_KML, ensemble=True)
+    assert refused.status_code == 422
+    body = refused.json()
+    assert body["status"] == "error"
+    assert body["code"] == "ensemble_unavailable"
+    assert "ensemble=false" in body["hint"]
+
+    # The point of refusing: the very next request still works.
+    assert post(client, VALLEY_KML, ensemble=False).status_code == 200

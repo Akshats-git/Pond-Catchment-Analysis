@@ -109,8 +109,12 @@ setsid ~/PondCatchmentAnalysis/run.sh >/dev/null 2>&1 </dev/null &
 ```
 
 The container is capped at 512 MB. One grid peaks near 300 MB and fits; the four-grid
-ensemble peaks at 581 MB and does not, so it is off there via
-`POND_API_DEFAULT_ENSEMBLE=false` and responses from the container carry no error bar.
+ensemble peaks at 581 MB and does not, so it is off there (`POND_API_DEFAULT_ENSEMBLE=false`,
+and `POND_API_ALLOW_ENSEMBLE=false` so an explicit `ensemble=true` gets a 422 instead of
+killing the worker). Responses from the container carry no error bar.
+
+Analyses run one at a time everywhere, not just there: two at once need over a gigabyte,
+and on a small host they do not queue, they OOM. Concurrent requests wait their turn.
 Details in [REPORT.md §7](REPORT.md).
 
 ## Configuration
@@ -124,6 +128,8 @@ POND_SITING_MIN_HEIGHT_ABOVE_TRUNK_M=3     # freeboard a site must keep above it
 POND_RAINFALL_ENABLED=false                # skip the live rainfall fetch entirely
 POND_RAINFALL_YEARS=10                     # years of daily records to average
 POND_API_DEFAULT_ENSEMBLE=false            # one grid instead of four, roughly 3x faster
+POND_API_ALLOW_ENSEMBLE=false              # refuse ensemble=true rather than run out of memory
+POND_API_MAX_CONCURRENT_ANALYSES=1         # analyses that run at once; the rest queue
 ```
 
 ## Tests
@@ -132,7 +138,7 @@ POND_API_DEFAULT_ENSEMBLE=false            # one grid instead of four, roughly 3
 pytest
 ```
 
-388 tests, about 113 seconds, all passing. No test needs the network:
+390 tests, about 119 seconds, all passing. No test needs the network:
 `tests/conftest.py` switches the live rainfall fetch off, and the Open-Meteo provider is
 exercised against a payload built in the test.
 

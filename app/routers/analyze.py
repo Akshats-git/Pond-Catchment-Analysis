@@ -28,6 +28,9 @@ not a kill switch, and it is documented as such rather than overstated.
 
 from __future__ import annotations
 
+import asyncio
+import weakref
+
 import anyio
 from fastapi import APIRouter, File, Form, Query, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
@@ -57,6 +60,28 @@ router = APIRouter(tags=["analysis"])
 
 _ACCEPTED_SUFFIXES = (".kml", ".kmz")
 
+_LIMITERS: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+"""One analysis semaphore per event loop, created on first use.
+
+A module-level semaphore would bind to whichever loop happened to touch it first, which
+is wrong under a test client that stands up a fresh loop per call. Keyed weakly so a
+finished loop takes its semaphore with it."""
+
+
+def _analysis_limiter() -> asyncio.Semaphore:
+    """The gate that keeps concurrent analyses from exhausting memory.
+
+    See `APIConfig.max_concurrent_analyses`: two analyses at once need more than a
+    gigabyte, and on a small container they do not queue, they OOM.
+    """
+    loop = asyncio.get_running_loop()
+    limiter = _LIMITERS.get(loop)
+    if limiter is None:
+        limiter = asyncio.Semaphore(settings.api.max_concurrent_analyses)
+        _LIMITERS[loop] = limiter
+    return limiter
+
+
 _STATUS_BY_CODE: dict[str, int] = {
     # 413 for more data than the service will take on.
     "file_too_large": status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -73,6 +98,7 @@ _STATUS_BY_CODE: dict[str, int] = {
     "no_buildable_ground": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "no_ground_clear_of_watercourse": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "no_site_found": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "ensemble_unavailable": status.HTTP_422_UNPROCESSABLE_ENTITY,
 }
 """Codes that are not 400. Everything else the core raises is a file that cannot be
 analysed, which is what 400 means here."""
@@ -226,18 +252,36 @@ async def analyze_contour(
             "ensemble": ensemble,
         }
     )
+    if params.ensemble and not settings.api.allow_ensemble:
+        # Refused rather than attempted: see `APIConfig.allow_ensemble`. Dying here would
+        # take every other request in flight with it, so the honest answer is a 422 that
+        # names the limit and points at the analysis the host *can* do.
+        raise APIError(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "ensemble_unavailable",
+            "This host does not have the memory to run the resolution ensemble.",
+            "Send ensemble=false, or omit it. The analysis is unchanged except that the "
+            "catchment area comes back without its cross-resolution error bar, and "
+            "confidence reads `unassessed`.",
+        )
+
     filename = file.filename or "upload.kml"
     data = await _read_upload(file)
 
     try:
+        # The queue wait sits inside the timeout on purpose: a client is promised an
+        # answer or an error within `request_timeout_s`, and waiting for a slot is part
+        # of the wait. A queue too long to clear in time gets the same honest 504.
         with anyio.fail_after(settings.api.request_timeout_s):
-            result = await run_in_threadpool(analyse, data, filename, params)
+            async with _analysis_limiter():
+                result = await run_in_threadpool(analyse, data, filename, params)
     except TimeoutError as exc:
         raise APIError(
             status.HTTP_504_GATEWAY_TIMEOUT,
             "analysis_timeout",
             f"The analysis did not finish within {settings.api.request_timeout_s:.0f} s.",
-            "Request a coarser grid_resolution, or set ensemble=false.",
+            "Request a coarser grid_resolution, or set ensemble=false. If several "
+            "analyses were sent at once they run one at a time, so try again in a minute.",
         ) from exc
     except _ANALYSIS_ERRORS as exc:
         raise APIError(
