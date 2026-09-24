@@ -51,6 +51,14 @@ echo $$ >&9
 export POND_API_DEFAULT_ENSEMBLE=false
 export POND_API_ALLOW_ENSEMBLE=false
 
+# The host's role, written by deploy/deploy.sh. On the gateway (sys1) it sets
+# POND_JOBS_WORKERS to the workers' bridge addresses; on a worker it leaves it empty, so
+# the process runs analyses itself. Absent, this is a single self-contained service.
+if [ -f .env.role ]; then
+    # shellcheck disable=SC1091
+    . ./.env.role
+fi
+
 # ---------------------------------------------------------------------------- #
 # Serve, and restart if the kernel or anything else takes it out.
 # ---------------------------------------------------------------------------- #

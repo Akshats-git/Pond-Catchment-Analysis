@@ -35,3 +35,4 @@ REPORT.md
 # data/tiles/ (the committed demo-region seed) is NOT ignored.
 .cache/
 .data/
+.env.role
