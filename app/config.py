@@ -533,15 +533,26 @@ class CVConfig:
     imagery_zoom: int = 16
     """About 2.2 m pixels at 21 N: a village pond is tens of pixels across."""
 
-    max_tiles: int = 400
-    water_min_area_m2: float = 150.0
-    """Smaller dark blobs are shadows, tanks or roofs, not a pond."""
-    water_max_brightness: float = 0.42
-    water_max_exg: float = 0.02
-    """Water is dark and not green. See `app/cv/imagery.py` for how each is measured."""
-    vegetation_min_exg: float = 0.06
-    builtup_min_brightness: float = 0.55
-    builtup_max_saturation: float = 0.18
+    min_imagery_zoom: int = 13
+    max_pixels: int = 3_000_000
+    """Imagery pixels read at once. A bigger area is read at a coarser zoom rather than
+    refused; this is what bounds the CV's memory at about 150 MB on a 512 MB container."""
+    water_min_area_m2: float = 1500.0
+    """Smaller smooth dark blobs are flooded paddy, shadow or a tank, not a pond. The
+    smallest real pond on the sample area is about 2,400 m2; paddy specks are ~500 m2."""
+    water_max_brightness: float = 0.55
+    water_max_texture: float = 0.012
+    water_min_blue_share: float = 0.265
+    """Village ponds on this imagery are *green* (algae, silt): their excess-green index
+    is the same as a paddy field's. What gives them away is that they are glass-smooth
+    (local std under 0.01 against 0.015-0.05 for crops) and a little bluer. Measured on
+    the sample area; see app/cv/imagery.py."""
+    vegetation_min_exg: float = 0.30
+    builtup_min_texture: float = 0.09
+    builtup_min_brightness: float = 0.62
+    builtup_max_saturation: float = 0.15
+    builtup_min_density: float = 0.22
+    """Share of rough, unvegetated pixels within ~30 m that makes ground a settlement."""
     texture_window_px: int = 7
 
 

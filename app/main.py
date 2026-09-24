@@ -23,6 +23,7 @@ from app.config import settings
 from app.errors import install_handlers
 from app.routers.analyze import UPLOAD_FIELD, UPLOAD_FIELD_ALIAS
 from app.routers.analyze import router as analyze_router
+from app.routers.imagery import router as imagery_router
 from app.routers.jobs import router as jobs_router
 from app.routers.places import router as places_router
 from app.schemas.responses import HealthResponse
@@ -122,6 +123,7 @@ def create_app() -> FastAPI:
     app.include_router(analyze_router, prefix=settings.api.api_prefix)
     app.include_router(jobs_router, prefix=settings.api.api_prefix)
     app.include_router(places_router, prefix=settings.api.api_prefix)
+    app.include_router(imagery_router, prefix=settings.api.api_prefix)
 
     generated = app.openapi
 

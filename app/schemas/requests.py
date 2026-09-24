@@ -28,7 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.config import settings
 
-__all__ = ["AnalysisParams", "AreaRequest"]
+__all__ = ["AnalysisParams", "AreaRequest", "SelectionRequest"]
 
 
 class AnalysisParams(BaseModel):
@@ -236,3 +236,20 @@ class AreaRequest(AnalysisParams):
 
         body = self.model_dump(mode="json")
         return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()[:32]
+
+
+class SelectionRequest(BaseModel):
+    """An area on the map and nothing else: the imagery endpoints' body."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    bbox: list[float] | None = Field(
+        default=None,
+        description="[min_lon, min_lat, max_lon, max_lat].",
+        examples=[[81.2814, 21.2398, 81.3126, 21.2636]],
+    )
+    polygon: list[list[float]] | None = Field(default=None, description="[[lon, lat], ...].")
+    geometry: dict | None = Field(default=None, description="A GeoJSON Polygon.")
+
+    _one_selection = AreaRequest._one_selection
+    area = AreaRequest.area

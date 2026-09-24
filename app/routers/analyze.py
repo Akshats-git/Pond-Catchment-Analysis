@@ -59,6 +59,7 @@ from app.core.kml_parser import ContourParseError, parse_contours
 from app.core.pond_siting import SitingError
 from app.core.raster_dem import AreaError
 from app.core.render import RenderError, render_png
+from app.cv.imagery import ImageryUnavailable
 from app.errors import APIError
 from app.pipeline import AnalysisError, Stopwatch, analyse, analyse_area
 from app.providers.elevation import ElevationUnavailable
@@ -182,6 +183,7 @@ _ANALYSIS_ERRORS = (
     AreaError,
     ElevationUnavailable,
     ContourError,
+    ImageryUnavailable,
 )
 """Every structured error the pipeline can raise. They share the `(code, detail, hint)`
 shape by construction and not by coincidence. See each module's error class."""

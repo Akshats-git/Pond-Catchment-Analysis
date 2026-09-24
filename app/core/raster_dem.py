@@ -40,7 +40,7 @@ from app.core.dem_builder import DEM, ContourSurface, DEMBuildError, DEMMetadata
 from app.core.projection import EquirectangularENU, Projection
 from app.providers.elevation import ElevationProvider, ElevationUnavailable, default_provider
 
-__all__ = ["AreaError", "AreaOfInterest", "RasterSurface"]
+__all__ = ["AreaError", "AreaOfInterest", "RasterSurface", "polygon_mask"]
 
 
 class AreaError(Exception):
@@ -453,35 +453,40 @@ class RasterSurface:
 
     # ---- the selection on the grid ---- #
     def inside_mask(self, dem: DEM) -> np.ndarray:
-        """(ny, nx) bool: cells whose centre lies inside what the user drew.
+        """(ny, nx) bool: cells whose centre lies inside what the user drew."""
+        return polygon_mask(self.aoi.ring, dem) & dem.valid
 
-        A scanline fill at cell centres: each row's crossings with every edge, sorted and
-        paired, even-odd. Rows times edges rather than cells times edges, so a million-cell
-        grid and a 2,000-corner polygon cost a couple of million operations, not billions.
-        Exact at centres, where Pillow's polygon fill includes both boundaries and
-        overstates a rectangle by a cell on each side.
-        """
-        ny, nx = dem.shape
-        xy = dem.projection.forward(self.aoi.ring)
-        x0, y0 = dem.origin_xy
-        cols = (xy[:, 0] - x0) / dem.resolution_m
-        rows = (xy[:, 1] - y0) / dem.resolution_m
-        ax, ay = cols, rows
-        bx, by = np.roll(cols, -1), np.roll(rows, -1)
 
-        mask = np.zeros((ny, nx), dtype=bool)
-        lo = max(0, int(np.floor(rows.min())))
-        hi = min(ny - 1, int(np.ceil(rows.max())))
-        for r in range(lo, hi + 1):
-            # Half-open in y, so a vertex exactly on the scanline is counted once.
-            crosses = (ay > r) != (by > r)
-            if not crosses.any():
-                continue
-            t = (r - ay[crosses]) / (by[crosses] - ay[crosses])
-            xs = np.sort(ax[crosses] + t * (bx[crosses] - ax[crosses]))
-            for start, end in zip(xs[0::2], xs[1::2]):
-                c0 = max(0, int(np.ceil(start)))
-                c1 = min(nx - 1, int(np.ceil(end)) - 1)
-                if c1 >= c0:
-                    mask[r, c0 : c1 + 1] = True
-        return mask & dem.valid
+def polygon_mask(ring_lonlat: np.ndarray, dem: DEM) -> np.ndarray:
+    """(ny, nx) bool: cells of `dem`'s grid whose centre lies inside a lon/lat ring.
+
+    A scanline fill at cell centres: each row's crossings with every edge, sorted and
+    paired, even-odd. Rows times edges rather than cells times edges, so a million-cell
+    grid and a 2,000-corner polygon cost a couple of million operations, not billions.
+    Exact at centres, where Pillow's polygon fill includes both boundaries and overstates
+    a rectangle by a cell on each side.
+    """
+    ny, nx = dem.shape
+    xy = dem.projection.forward(np.asarray(ring_lonlat, dtype=np.float64))
+    x0, y0 = dem.origin_xy
+    cols = (xy[:, 0] - x0) / dem.resolution_m
+    rows = (xy[:, 1] - y0) / dem.resolution_m
+    ax, ay = cols, rows
+    bx, by = np.roll(cols, -1), np.roll(rows, -1)
+
+    mask = np.zeros((ny, nx), dtype=bool)
+    lo = max(0, int(np.floor(rows.min())))
+    hi = min(ny - 1, int(np.ceil(rows.max())))
+    for r in range(lo, hi + 1):
+        # Half-open in y, so a vertex exactly on the scanline is counted once.
+        crosses = (ay > r) != (by > r)
+        if not crosses.any():
+            continue
+        t = (r - ay[crosses]) / (by[crosses] - ay[crosses])
+        xs = np.sort(ax[crosses] + t * (bx[crosses] - ax[crosses]))
+        for start, end in zip(xs[0::2], xs[1::2]):
+            c0 = max(0, int(np.ceil(start)))
+            c1 = min(nx - 1, int(np.ceil(end)) - 1)
+            if c1 >= c0:
+                mask[r, c0 : c1 + 1] = True
+    return mask
