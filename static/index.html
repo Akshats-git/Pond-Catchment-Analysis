@@ -127,7 +127,7 @@
     font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
     color: var(--muted); font-weight: 700;
   }
-  input[type=number], input[type=text], select {
+  input[type=number], input[type=text], input[type=search], select {
     font: inherit; font-size: 13px; padding: 6px 8px; height: 32px;
     border: 1px solid var(--line); border-radius: var(--radius-sm);
     color: var(--ink); background: var(--panel); appearance: none;
@@ -200,21 +200,72 @@
     padding: 3px 7px; border-radius: 5px;
   }
 
+  /* segmented controls: the mode switch and the drawing tools */
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; height: 32px; }
+  .seg button {
+    font: inherit; font-size: 13px; border: 0; background: var(--panel); color: var(--ink-soft);
+    padding: 0 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button:hover:not(.on) { color: var(--accent-deep); background: var(--accent-wash); }
+  .seg button.on { background: var(--accent); color: var(--on-accent); }
+  .seg svg { width: 14px; height: 14px; }
+  .inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+  .search { position: relative; }
+  .search input { width: 190px; padding-left: 28px; }
+  .search .glass { position: absolute; left: 9px; top: 9px; width: 14px; height: 14px; color: var(--muted); pointer-events: none; }
+  #search-results {
+    position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; width: min(340px, calc(100vw - 28px));
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 4px; max-height: 320px; overflow-y: auto;
+  }
+  #search-results button {
+    display: block; width: 100%; text-align: left; font: inherit; font-size: 13px; border: 0;
+    background: none; padding: 7px 9px; border-radius: 5px; cursor: pointer; color: var(--ink);
+  }
+  #search-results button:hover, #search-results button:focus { background: var(--accent-wash); }
+  #search-results small { display: block; color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #search-results .msg { padding: 8px 9px; font-size: 12.5px; color: var(--muted); }
+
+  #aoi-chip {
+    display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 6px 0 11px;
+    border: 1px solid var(--accent); background: var(--accent-wash); color: var(--accent-deep);
+    border-radius: var(--radius-sm); font-size: 13px; font-variant-numeric: tabular-nums;
+  }
+  #aoi-chip.over { border-color: var(--bad); background: var(--bad-wash); color: var(--bad); }
+  #aoi-chip .x { border: 0; background: none; cursor: pointer; color: inherit; font-size: 16px; line-height: 1; padding: 2px 4px; opacity: .65; }
+  #aoi-chip .x:hover { opacity: 1; }
+  button.ghost {
+    font: inherit; font-size: 12.5px; border: 0; background: none; color: var(--accent-deep);
+    cursor: pointer; padding: 0 4px; height: 32px; text-decoration: underline; text-underline-offset: 3px;
+  }
+
   #derived { font-size: 12px; color: var(--muted); padding-bottom: 7px; }
   #derived b { color: var(--ink-soft); font-weight: 600; }
   #prog { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; overflow: hidden; display: none; }
   #prog.on { display: block; }
   #prog i { display: block; height: 100%; width: 30%; background: var(--accent); animation: slide 1.3s ease-in-out infinite; }
+  #prog.det i { animation: none; transition: width .25s ease-out; }
+  .meter { height: 6px; background: var(--line-soft); border-radius: 3px; overflow: hidden; margin-top: 10px; }
+  .meter i { display: block; height: 100%; background: var(--accent); transition: width .25s ease-out; }
+  .stages { list-style: none; margin: 10px 0 0; padding: 0; font-size: 12.5px; color: var(--muted); }
+  .stages li { padding: 2px 0 2px 20px; position: relative; }
+  .stages li::before { content: ""; position: absolute; left: 4px; top: 8px; width: 7px; height: 7px; border-radius: 50%; background: var(--line); }
+  .stages li.done { color: var(--ink-soft); }
+  .stages li.done::before { background: var(--good); }
+  .stages li.now { color: var(--ink); font-weight: 600; }
+  .stages li.now::before { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
   @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(430%); } }
 
   /* ---------------- layout ---------------- */
   main { flex: 1; display: flex; min-height: 0; }
   #map {
     position: relative; flex: 1; min-width: 0; overflow: hidden;
-    background: #c9d3da; cursor: grab; touch-action: none;
+    background: #c9d3da; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
   }
   #map.dragging { cursor: grabbing; }
-  #map.picking { cursor: crosshair; }
+  #map.picking, #map.drawing { cursor: crosshair; }
   #tiles { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
   #tiles img {
     position: absolute;
@@ -301,7 +352,12 @@
     background: var(--accent-deep); color: var(--on-accent); font-size: 12.5px;
     padding: 6px 14px; border-radius: 20px; box-shadow: var(--shadow); display: none;
   }
-  #map.picking #banner { display: block; }
+  #map.picking #banner, #map.drawing #banner { display: flex; }
+  #banner { align-items: center; gap: 10px; }
+  #banner button {
+    font: inherit; font-size: 12px; font-weight: 600; border: 0; border-radius: 12px; cursor: pointer;
+    background: var(--on-accent); color: var(--accent-deep); padding: 2px 10px;
+  }
 
   /* A file may be dropped anywhere on the map, so the target is the map itself. */
   #dropveil {
@@ -414,6 +470,9 @@
 
   .empty { color: var(--muted); font-size: 13px; text-align: center; padding: 40px 24px; line-height: 1.6; }
   .empty strong { display: block; color: var(--ink); font-size: 14px; margin-bottom: 4px; }
+  .empty ol { text-align: left; margin: 14px auto 0; max-width: 270px; padding-left: 18px; }
+  .empty ol li { margin: 4px 0; }
+  .empty .primary { margin-top: 16px; }
   .working { display: flex; align-items: center; gap: 10px; font-size: 13.5px; padding: 16px; }
   .spinner {
     width: 15px; height: 15px; border: 2px solid var(--line); border-top-color: var(--accent);
@@ -445,6 +504,36 @@
 
 <div id="bar">
   <div class="ctl">
+    <span class="lbl">Where</span>
+    <div class="seg" id="mode" role="tablist" aria-label="How to choose the land">
+      <button data-mode="area" class="on" role="tab">Draw an area</button>
+      <button data-mode="sheet" role="tab" title="The more accurate path, if you have a surveyed contour sheet">I have a survey sheet</button>
+    </div>
+  </div>
+
+  <div class="ctl" id="area-ctl">
+    <span class="lbl">Area on the map</span>
+    <div class="inline">
+      <form class="search" id="search" autocomplete="off">
+        <svg class="glass" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+        <input type="search" id="q" placeholder="Find a village" aria-label="Find a village or town">
+        <div id="search-results" hidden></div>
+      </form>
+      <div class="seg" id="tools">
+        <button data-tool="rect" title="Drag a rectangle on the map">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="4" y="6" width="16" height="12" rx="1"/></svg>Box
+        </button>
+        <button data-tool="poly" title="Click the corners; double-click or press Enter to finish">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M5 8 12 4l7 5-3 10H8z"/></svg>Polygon
+        </button>
+      </div>
+      <span id="aoi-chip" hidden><span class="txt"></span>
+        <button class="x" id="aoi-clear" title="Clear the area" aria-label="Clear the area">&times;</button></span>
+      <button class="ghost" id="sample">Try the sample area</button>
+    </div>
+  </div>
+
+  <div class="ctl" id="sheet-ctl" hidden>
     <span class="lbl">Contour map</span>
     <input type="file" id="file" hidden
            accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz">
@@ -531,7 +620,7 @@
     <div id="tiles"></div>
     <svg id="contours" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
     <svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg>
-    <div id="banner">Click the map to place the pour point</div>
+    <div id="banner"><span class="txt">Click the map to place the pour point</span><button id="banner-done" hidden>Finish</button></div>
     <div id="dropveil"><span>Drop the contour map</span></div>
     <div id="layers" class="map-ui">
       <button data-layer="satellite" class="on">Satellite</button>
@@ -707,7 +796,7 @@ const contourEl = document.getElementById("contours");
 const contourButton = document.getElementById("contour-toggle");
 
 const contours = {
-  file: null,       // the File these lines were read from, so a new upload invalidates them
+  source: null,     // the File or area these lines were drawn from, so a new one invalidates them
   on: false,
   loading: false,
   error: null,
@@ -815,26 +904,36 @@ function renderContours() {
   }
 }
 
+// What the contour layer should currently show: the uploaded file in sheet mode, the
+// drawn area in area mode. Compared by identity, so a new file or a redrawn area is new.
+function contourSource() {
+  return mode === "sheet" ? chosen : (aoi.ring ? aoiKey() : null);
+}
+
 async function loadContours() {
-  const file = chosen;
+  const file = contourSource();
+  if (!file) return;
   contours.loading = true;
   contours.error = null;
   syncContourButton();
   const form = new FormData();
-  form.append("contour_map", file, file.name);
+  if (mode === "sheet") form.append("contour_map", file, file.name);
+  else form.append("bbox", aoiBBox().map((v) => v.toFixed(6)).join(","));
   try {
     const response = await fetch(API + "/api/v1/contours", { method: "POST", body: form });
     const body = await response.json();
     if (!response.ok) throw new Error(body.detail || `HTTP ${response.status}`);
     // The reader may have picked another file while this was in flight. Drawing the old
     // one over the new one's catchment would be worse than drawing nothing.
-    if (chosen !== file) return;
-    contours.file = file;
+    if (contourSource() !== file) return;
+    contours.source = file;
     contours.meta = body;
     buildContourLayer(body.geojson);
     // Before an analysis there is nothing else on the map, so this is also how a reader
     // finds their sheet without hunting for it.
-    if (!features.length && body.bbox) fitBounds(body.bbox);
+    // In area mode the reader has just drawn the area and is looking at it; moving the
+    // map under them would be the page taking the view away.
+    if (mode === "sheet" && !features.length && body.bbox) fitBounds(body.bbox);
   } catch (error) {
     contours.error = String(error.message || error);
     contours.on = false;
@@ -847,27 +946,29 @@ async function loadContours() {
 }
 
 function syncContourButton() {
-  const ready = contours.file === chosen && contours.group !== null;
-  contourButton.disabled = !chosen || contours.loading;
+  const source = contourSource();
+  const ready = contours.source === source && contours.group !== null;
+  contourButton.disabled = !source || contours.loading;
   contourButton.classList.toggle("on", contoursDrawn());
   contourButton.classList.toggle("failed", contours.error !== null);
   // A failure has to be readable without hovering: a button that turns nothing on and
   // says nothing looks like a broken button rather than an unreadable file.
   contourButton.querySelector(".txt").textContent =
     contours.loading ? "Reading" : contours.error ? "No contours" : "Contours";
-  contourButton.title = !chosen
-    ? "Choose a contour map first"
+  contourButton.title = !source
+    ? (mode === "sheet" ? "Choose a contour map first" : "Draw an area first")
     : contours.error
     ? "Could not draw the contours. " + contours.error
     : contours.on
     ? "Hide the contour lines"
     : ready
     ? "Show the contour lines"
-    : "Draw the contour lines from this file";
+    : mode === "sheet" ? "Draw the contour lines from this file"
+    : "Generate contour lines for this area from the elevation data";
 }
 
 function forgetContours() {
-  contours.file = null;
+  contours.source = null;
   contours.on = false;
   contours.error = null;
   contours.meta = null;
@@ -877,9 +978,9 @@ function forgetContours() {
 }
 
 contourButton.onclick = () => {
-  if (!chosen || contours.loading) return;
+  if (!contourSource() || contours.loading) return;
   contours.on = !contours.on;
-  if (contours.on && contours.file !== chosen) {
+  if (contours.on && contours.source !== contourSource()) {
     loadContours();
   } else {
     syncContourButton();
@@ -946,6 +1047,7 @@ function renderOverlay() {
   overlayEl.setAttribute("width", w);
   overlayEl.setAttribute("height", h);
   overlayEl.replaceChildren();
+  drawAoiOutline();
 
   // With contours underneath, the catchment fill stops being the thing that shows where
   // the ground is and starts being the thing hiding it. So the fills step back and the
@@ -1059,6 +1161,8 @@ function renderOverlay() {
       overlayEl.appendChild(label);
     }
   }
+
+  drawAoiHandles();
 
   if (pourPoint) {
     const [x, y] = screenOf(pourPoint.lon, pourPoint.lat);
@@ -1175,13 +1279,35 @@ mapEl.addEventListener("pointerdown", (event) => {
   // The controls sit inside the map so they float over it. Capturing the pointer for a
   // drag would redirect the matching pointerup to the map, and the browser would never
   // synthesise the click, which left every button on the map dead until this guard.
-  if (event.target.closest(".map-ui")) return;
+  if (event.target.closest(".map-ui") || event.target.closest("#banner")) return;
+  const rect = mapEl.getBoundingClientRect();
+  const at = lonLatOf(event.clientX - rect.left, event.clientY - rect.top);
+  // A corner handle of the selection: drag that corner instead of the map.
+  const handle = event.target.closest && event.target.closest("[data-vertex]");
+  if (handle && mode === "area" && !drawTool) {
+    vertexDrag = { index: Number(handle.dataset.vertex) };
+    mapEl.setPointerCapture(event.pointerId);
+    return;
+  }
+  // The box tool takes the drag for itself: press, drag, release is the rectangle.
+  if (drawTool === "rect") {
+    rectStart = at;
+    mapEl.setPointerCapture(event.pointerId);
+    return;
+  }
   drag = { x: event.clientX, y: event.clientY, moved: 0 };
   suppressClick = false;
   mapEl.setPointerCapture(event.pointerId);
   mapEl.classList.add("dragging");
 });
 mapEl.addEventListener("pointermove", (event) => {
+  const rect = mapEl.getBoundingClientRect();
+  if (vertexDrag || rectStart || drawTool === "poly") {
+    const at = lonLatOf(event.clientX - rect.left, event.clientY - rect.top);
+    if (vertexDrag) { moveVertex(vertexDrag.index, at); return; }
+    if (rectStart) { aoi.kind = "bbox"; aoi.ring = rectRing(rectStart, at); syncAoi(); render(); return; }
+    if (drawTool === "poly" && !drag) { aoi.cursor = at; render(); }
+  }
   if (!drag) return;
   const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
   drag.moved += Math.abs(dx) + Math.abs(dy);
@@ -1197,14 +1323,30 @@ mapEl.addEventListener("pointerup", (event) => {
   const wasClick = drag && drag.moved < 4;
   drag = null;
   mapEl.classList.remove("dragging");
+  const rect = mapEl.getBoundingClientRect();
+  const at = lonLatOf(event.clientX - rect.left, event.clientY - rect.top);
+  if (vertexDrag) { vertexDrag = null; aoiChanged(); return; }
+  if (rectStart) {
+    const [a, b] = [screenOf(...rectStart), screenOf(...at)];
+    rectStart = null;
+    setTool(null);
+    // A click with the box tool is not a box.
+    if (Math.abs(a[0] - b[0]) < 6 || Math.abs(a[1] - b[1]) < 6) { clearAoi(); return; }
+    aoiChanged();
+    return;
+  }
+  if (wasClick && drawTool === "poly") { addPolygonVertex(at); return; }
   if (wasClick && picking) {
-    const rect = mapEl.getBoundingClientRect();
-    const [lon, lat] = lonLatOf(event.clientX - rect.left, event.clientY - rect.top);
-    setPourPoint(lon, lat);
+    setPourPoint(at[0], at[1]);
     setPicking(false);
   }
 });
-mapEl.addEventListener("pointercancel", () => { drag = null; mapEl.classList.remove("dragging"); });
+mapEl.addEventListener("dblclick", (event) => {
+  if (drawTool === "poly") { event.preventDefault(); finishPolygon(); }
+});
+mapEl.addEventListener("pointercancel", () => {
+  drag = null; rectStart = null; vertexDrag = null; mapEl.classList.remove("dragging");
+});
 
 mapEl.addEventListener("wheel", (event) => {
   if (event.target.closest(".map-ui")) return;
@@ -1232,7 +1374,8 @@ function zoomBy(delta, px, py) {
 document.getElementById("zoom-in").onclick = () => zoomBy(1);
 document.getElementById("zoom-out").onclick = () => zoomBy(-1);
 document.getElementById("zoom-fit").onclick = () => {
-  const bbox = lastBBox || (contoursDrawn() ? contours.meta.bbox : null);
+  const bbox = lastBBox || (mode === "area" && aoi.ring ? aoiBBox() : null) ||
+               (contoursDrawn() ? contours.meta.bbox : null);
   if (bbox) fitBounds(bbox);
 };
 for (const button of document.querySelectorAll("#layers button")) {
@@ -1252,7 +1395,10 @@ new ResizeObserver(render).observe(mapEl);
 let picking = false;
 function setPicking(on) {
   picking = on;
+  if (on) setTool(null);
   mapEl.classList.toggle("picking", on);
+  document.querySelector("#banner .txt").textContent = "Click the map to place the pour point";
+  document.getElementById("banner-done").hidden = true;
   document.getElementById("pick").classList.toggle("on", on);
   document.getElementById("pick").textContent = on ? "Cancel" : "Pick on the map";
 }
@@ -1355,7 +1501,17 @@ document.addEventListener("pointerdown", (event) => {
   if (!advEl.hidden && !event.target.closest(".adv-wrap")) showAdvanced(false);
 });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") { showAdvanced(false); if (picking) setPicking(false); }
+  const typing = event.target.closest && event.target.closest("input, select, textarea");
+  if (event.key === "Escape") {
+    showAdvanced(false);
+    if (picking) setPicking(false);
+    if (drawTool) { if (aoi.drawing) clearAoi(); setTool(null); }
+    hideSearchResults();
+  }
+  if (drawTool === "poly" && aoi.drawing && !typing) {
+    if (event.key === "Enter") { event.preventDefault(); finishPolygon(); }
+    if (event.key === "Backspace") { event.preventDefault(); aoi.drawing.pop(); syncAoi(); render(); }
+  }
 });
 // Picking happens on the map, which the popover covers.
 document.getElementById("pick").addEventListener("click", () => showAdvanced(false));
@@ -1547,9 +1703,21 @@ function waterView() {
 }
 
 function dataView() {
-  const body = lastBody, input = body.input, dem = body.dem;
+  const body = lastBody, input = body.input, dem = body.dem, area = body.area;
+  const source = area ? h("div", { class: "sec" }, [
+      h("h3", { text: "Selected area" }),
+      rows([
+        ["Shape", area.kind === "bbox" ? "Box" : "Polygon"],
+        ["Selected", num(area.selection_area_ha, 1) + " ha"],
+        ["Analysed, with margin", num(area.analysed_area_ha, 1) + " ha"],
+        ["Elevation from", area.elevation_source],
+        ["Tiles", `${area.tiles} at zoom ${area.tile_zoom ?? "n/a"}`],
+        ["Tiles served from", Object.entries(area.tile_sources).map(([k, v]) => `${k} ${v}`).join(", ")],
+        ["Range", `${input.elevation_range_m[0]} to ${input.elevation_range_m[1]} m`],
+      ]),
+    ]) : null;
   const parts = [
-    h("div", { class: "sec" }, [
+    source || h("div", { class: "sec" }, [
       h("h3", { text: "Contour map" }),
       rows([
         ["File", input.filename],
@@ -1609,6 +1777,11 @@ function renderResults(body, refit) {
   lastBody = body;
   features = body.geojson.features || [];
   lastBBox = body.geojson.bbox || null;
+  if (body.area && lastBBox) {
+    const s2 = body.area.selection_bbox;
+    lastBBox = [Math.min(s2[0], lastBBox[0]), Math.min(s2[1], lastBBox[1]),
+                Math.max(s2[2], lastBBox[2]), Math.max(s2[3], lastBBox[3])];
+  }
   buildLegend();
   renderPanel();
   if (refit && lastBBox) fitBounds(lastBBox); else render();
@@ -1715,7 +1888,7 @@ function chooseFile(file) {
   chipEl.querySelector(".name").textContent = file.name;
   chipEl.querySelector(".size").textContent = size(file.size);
   chooseButton.hidden = true;
-  runButton.disabled = false;
+  syncRunButton();
 
   // The lines are what the reader checks the boundary against, and reading them takes
   // under a second, so they are drawn without being asked for. Their bbox is also how
@@ -1723,7 +1896,7 @@ function chooseFile(file) {
   contours.on = true;
   syncContourButton();
   loadContours().then(() => {
-    if (contours.file === file && contours.meta && contours.meta.bbox) {
+    if (contours.source === file && contours.meta && contours.meta.bbox) {
       lookupRainfall(contours.meta.bbox);
     }
   });
@@ -1738,7 +1911,7 @@ function clearFile() {
   autoRain = null;
   chipEl.hidden = true;
   chooseButton.hidden = false;
-  runButton.disabled = true;
+  syncRunButton();
   tabsEl.classList.remove("on");
   showEmpty();
   renderDerived();
@@ -1775,6 +1948,26 @@ function optional(form, id, name) {
 }
 
 function showEmpty() {
+  if (mode === "area") {
+    const ready = aoi.ring && !aoiProblem();
+    resultsEl.replaceChildren(h("div", { class: "empty" }, ready ? [
+      h("strong", { text: "Ready" }),
+      `${formatHa(aoiAreaM2(aoi.ring))} selected. Press Analyse this area.`,
+      h("div", { class: "note info", text: "The service also reads a margin around what you drew, so " +
+        "streams that cross your line are counted in full. The pond itself stays inside it." }),
+    ] : [
+      h("strong", { text: "Choose the land on the map" }),
+      h("ol", null, [
+        h("li", { text: "Find the village with the search box, or pan and zoom to it." }),
+        h("li", { text: "Pick Box or Polygon and draw around the land." }),
+        h("li", { text: "Press Analyse this area." }),
+      ]),
+      h("button", { class: "primary", text: "Try the sample area", onclick: () => useSample() }),
+      h("div", { class: "note info", text: "Have a surveyed contour sheet? Switch to “I have a survey " +
+        "sheet” above; it is the more accurate path." }),
+    ]));
+    return;
+  }
   resultsEl.replaceChildren(h("div", { class: "empty" }, [
     h("strong", { text: chosen ? "Ready" : "No contour map yet" }),
     chosen ? "Press Analyse." : "Choose a .kml or .kmz file, or drop one on the map.",
@@ -1783,7 +1976,9 @@ function showEmpty() {
 
 const ensembleBox = document.getElementById("ensemble");
 
-runButton.onclick = async () => {
+runButton.onclick = () => (mode === "area" ? runArea() : runSheet());
+
+async function runSheet() {
   if (!chosen) return;
   const form = new FormData();
   form.append("contour_map", chosen, chosen.name);
@@ -1798,13 +1993,7 @@ runButton.onclick = async () => {
     form.append("lon", pourPoint.lon);
   }
 
-  runButton.disabled = true;
-  progEl.classList.add("on");
-  tabsEl.classList.remove("on");
-  features = [];
-  lastBody = null;
-  buildLegend();
-  render();
+  startRun();
 
   const started = Date.now();
   const label = h("span", { text: "Analysing" });
@@ -1818,14 +2007,7 @@ runButton.onclick = async () => {
     const body = await response.json();
     clearInterval(ticker);
     if (!response.ok) {
-      resultsEl.replaceChildren(h("div", { class: "sec" }, [
-        h("h3", { text: "That map could not be analysed" }),
-        h("div", { class: "note bad" }, [
-          h("b", { text: body.code || `HTTP ${response.status}` }),
-          body.detail || "The request failed.",
-        ]),
-        body.hint ? h("div", { class: "note info", text: body.hint }) : null,
-      ]));
+      showFailure("That map could not be analysed", body, response.status);
       return;
     }
     selectedRank = 1;
@@ -1840,10 +2022,436 @@ runButton.onclick = async () => {
     ]));
   } finally {
     clearInterval(ticker);
-    progEl.classList.remove("on");
-    runButton.disabled = false;
+    finishRun();
+  }
+}
+
+/* --------------------------------------------------------------------------
+ * Drawing an area (Phase 3)
+ *
+ * The map-first path. The reader drags a box or clicks a polygon around their village,
+ * and the service fetches free elevation tiles for it, so no survey sheet is needed. The
+ * selection is kept as one ring of [lon, lat] corners; a box is a four-corner ring whose
+ * corners stay square when dragged.
+ *
+ * The service analyses the selection plus a buffer, so catchments that cross the drawn
+ * line are counted in full, and keeps the pond inside what was drawn. The outline on the
+ * map is exactly what is sent.
+ * ----------------------------------------------------------------------- */
+let mode = "area";
+let drawTool = null;          // "rect" | "poly" | null
+let rectStart = null;         // [lon, lat] where a box drag began
+let vertexDrag = null;        // { index } while a corner handle is being dragged
+const aoi = { kind: null, ring: null, drawing: null, cursor: null };
+const limits = { maxKm2: 100, minHa: 2 };
+let healthInfo = null;
+const SAMPLE_BBOX = [81.2814, 21.2398, 81.3126, 21.2636];
+
+function rectRing(a, b) {
+  const [w, e] = [Math.min(a[0], b[0]), Math.max(a[0], b[0])];
+  const [south, north] = [Math.min(a[1], b[1]), Math.max(a[1], b[1])];
+  return [[w, south], [e, south], [e, north], [w, north]];
+}
+function aoiBBox(ring) {
+  ring = ring || aoi.ring;
+  let w = 180, south = 90, e = -180, north = -90;
+  for (const [lon, lat] of ring) {
+    w = Math.min(w, lon); e = Math.max(e, lon); south = Math.min(south, lat); north = Math.max(north, lat);
+  }
+  return [w, south, e, north];
+}
+// Ground area in m², on the same local equirectangular frame the service uses.
+function aoiAreaM2(ring) {
+  if (!ring || ring.length < 3) return 0;
+  const b = aoiBBox(ring);
+  const lat0 = (b[1] + b[3]) / 2 * Math.PI / 180;
+  const kx = 111320 * Math.cos(lat0), ky = 110540;
+  let sum = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const [x1, y1] = ring[i], [x2, y2] = ring[(i + 1) % ring.length];
+    sum += (x1 * kx) * (y2 * ky) - (x2 * kx) * (y1 * ky);
+  }
+  return Math.abs(sum) / 2;
+}
+function aoiKey() {
+  return aoi.kind + ":" + aoi.ring.map(([x, y]) => x.toFixed(6) + "," + y.toFixed(6)).join(";");
+}
+function formatHa(m2) {
+  const ha = m2 / 1e4;
+  return ha >= 1000 ? num(ha / 100, 1) + " km²" : num(ha, ha < 10 ? 1 : 0) + " ha";
+}
+// Whether the selection can be sent, and if not, why: said before the request, not after.
+function aoiProblem() {
+  if (!aoi.ring) return "Draw an area first.";
+  const m2 = aoiAreaM2(aoi.ring);
+  if (m2 / 1e6 > limits.maxKm2) return `Larger than the ${num(limits.maxKm2)} km² this service analyses at once. Draw a smaller area.`;
+  if (m2 / 1e4 < limits.minHa) return `Smaller than ${num(limits.minHa)} ha: too small to hold a catchment at 30 m data.`;
+  return null;
+}
+
+function syncAoi() {
+  const chip = document.getElementById("aoi-chip");
+  const ring = aoi.drawing && aoi.drawing.length >= 3 ? aoi.drawing : aoi.ring;
+  chip.hidden = !ring;
+  if (ring) {
+    const m2 = aoiAreaM2(ring);
+    const over = m2 / 1e6 > limits.maxKm2;
+    chip.classList.toggle("over", over);
+    chip.querySelector(".txt").textContent =
+      (aoi.drawing ? "Drawing · " : "") + formatHa(m2) + (over ? ` · over ${num(limits.maxKm2)} km²` : "");
+    chip.title = aoiProblem() || "The area that will be analysed. Drag a corner to adjust it.";
+  }
+  syncRunButton();
+}
+
+function setTool(tool) {
+  drawTool = tool;
+  for (const b of document.querySelectorAll("#tools button")) b.classList.toggle("on", b.dataset.tool === tool);
+  mapEl.classList.toggle("drawing", !!tool);
+  if (tool) { if (picking) setPicking(false); }
+  const text = document.querySelector("#banner .txt");
+  const done = document.getElementById("banner-done");
+  if (tool === "rect") {
+    text.textContent = "Drag a box over the land to analyse";
+    done.hidden = true;
+  } else if (tool === "poly") {
+    aoi.drawing = [];
+    aoi.cursor = null;
+    text.textContent = "Click each corner. Double-click, Enter or Finish to close it";
+    done.hidden = false;
+  } else {
+    aoi.drawing = null;
+    aoi.cursor = null;
+    done.hidden = true;
+  }
+  syncAoi();
+  render();
+}
+
+function addPolygonVertex(at) {
+  if (!aoi.drawing) aoi.drawing = [];
+  const pts = aoi.drawing;
+  // Clicking back on the first corner closes the shape, as in every drawing tool.
+  if (pts.length >= 3) {
+    const [x0, y0] = screenOf(...pts[0]), [x1, y1] = screenOf(...at);
+    if (Math.hypot(x1 - x0, y1 - y0) < 12) { finishPolygon(); return; }
+  }
+  pts.push(at);
+  syncAoi();
+  render();
+}
+
+function finishPolygon() {
+  const pts = (aoi.drawing || []).filter((p, i, all) => {
+    if (i === 0) return true;
+    const [x0, y0] = screenOf(...all[i - 1]), [x1, y1] = screenOf(...p);
+    return Math.hypot(x1 - x0, y1 - y0) >= 4;   // a double-click lands two corners on one spot
+  });
+  if (pts.length < 3) {
+    document.querySelector("#banner .txt").textContent = "A polygon needs at least three corners";
+    return;
+  }
+  aoi.kind = "polygon";
+  aoi.ring = pts;
+  setTool(null);
+  aoiChanged();
+}
+document.getElementById("banner-done").onclick = (event) => { event.stopPropagation(); finishPolygon(); };
+
+function moveVertex(index, at) {
+  if (aoi.kind === "bbox") {
+    const opposite = aoi.ring[(index + 2) % 4];
+    aoi.ring = rectRing(opposite, at);
+    // The ring re-normalises west-south-first, so follow the corner being dragged.
+    let best = 0, bestD = Infinity;
+    aoi.ring.forEach(([x, y], i) => { const d = Math.hypot(x - at[0], y - at[1]); if (d < bestD) { bestD = d; best = i; } });
+    vertexDrag.index = best;
+  } else {
+    aoi.ring[index] = at;
+  }
+  syncAoi();
+  render();
+}
+
+function clearAoi() {
+  aoi.kind = aoi.ring = aoi.drawing = aoi.cursor = null;
+  if (mode === "area") { forgetContours(); autoRain = null; renderDerived(); }
+  syncContourButton();
+  syncAoi();
+  buildLegend();
+  render();
+}
+document.getElementById("aoi-clear").onclick = () => clearAoi();
+
+// A finished or edited selection: its contours and its rainfall follow it.
+function aoiChanged() {
+  syncAoi();
+  syncContourButton();
+  if (!aoi.ring || aoiProblem()) { render(); return; }
+  if (!lastBody) showEmpty();
+  if (contours.source !== aoiKey()) {
+    contours.on = true;
+    loadContours();
+  }
+  lookupRainfall(aoiBBox());
+  render();
+}
+
+for (const button of document.querySelectorAll("#tools button")) {
+  button.onclick = () => setTool(drawTool === button.dataset.tool ? null : button.dataset.tool);
+}
+
+/* ---- drawing the selection ---- */
+function drawAoiOutline() {
+  if (mode !== "area") return;
+  let ring = aoi.drawing ? aoi.drawing.slice() : aoi.ring;
+  if (aoi.drawing && aoi.cursor) ring.push(aoi.cursor);
+  if (!ring || ring.length < 2) return;
+  const closed = !aoi.drawing || ring.length >= 3;
+  let d = "";
+  ring.forEach(([lon, lat], i) => {
+    const [x, y] = screenOf(lon, lat);
+    d += (i ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1);
+  });
+  if (closed) d += "Z";
+  const over = aoiProblem() && !aoi.drawing && aoi.ring;
+  overlayEl.appendChild(svg("path", { d, fill: "none", stroke: "#0b1620", "stroke-opacity": 0.55, "stroke-width": 5, "stroke-linejoin": "round" }));
+  overlayEl.appendChild(svg("path", {
+    d, fill: closed ? "#ffffff" : "none", "fill-opacity": features.length ? 0 : 0.08,
+    stroke: over ? "#f28b83" : "#ffffff", "stroke-width": 2, "stroke-dasharray": "7 5",
+    "stroke-linejoin": "round",
+  }));
+}
+function drawAoiHandles() {
+  if (mode !== "area") return;
+  const pts = aoi.drawing || (drawTool ? null : aoi.ring);
+  if (!pts) return;
+  pts.forEach(([lon, lat], i) => {
+    const [x, y] = screenOf(lon, lat);
+    const handle = svg("circle", {
+      cx: x, cy: y, r: aoi.drawing ? 4.5 : 6.5, fill: "#ffffff", stroke: "#0b4f8a", "stroke-width": 2,
+      class: aoi.drawing ? null : "hit", "data-vertex": aoi.drawing ? null : i,
+      style: aoi.drawing ? null : "cursor: move",
+    });
+    overlayEl.appendChild(aoi.drawing ? handle : tip(handle, "Drag to reshape the area"));
+  });
+}
+
+/* ---- the mode switch ---- */
+function setMode(next) {
+  if (next === mode) return;
+  mode = next;
+  for (const b of document.querySelectorAll("#mode button")) b.classList.toggle("on", b.dataset.mode === mode);
+  document.getElementById("area-ctl").hidden = mode !== "area";
+  document.getElementById("sheet-ctl").hidden = mode !== "sheet";
+  setTool(null);
+  if (picking) setPicking(false);
+  features = [];
+  lastBody = null;
+  lastBBox = null;
+  autoRain = null;
+  tabsEl.classList.remove("on");
+  forgetContours();
+  const grid = document.getElementById("grid_resolution");
+  grid.min = mode === "area" ? 5 : 2;
+  grid.max = mode === "area" ? 150 : 20;
+  grid.value = "";
+  applyEnsembleCapability(healthInfo || {});
+  if (mode === "area" && aoi.ring) aoiChanged();
+  if (mode === "sheet" && chosen) { contours.on = true; loadContours().then(() => contours.meta && lookupRainfall(contours.meta.bbox)); }
+  showEmpty();
+  renderDerived();
+  syncContourButton();
+  syncRunButton();
+  buildLegend();
+  render();
+}
+for (const button of document.querySelectorAll("#mode button")) button.onclick = () => setMode(button.dataset.mode);
+
+/* ---- place search ---- */
+const searchEl = document.getElementById("search");
+const searchResults = document.getElementById("search-results");
+function hideSearchResults() { searchResults.hidden = true; }
+searchEl.onsubmit = async (event) => {
+  event.preventDefault();
+  const q = document.getElementById("q").value.trim();
+  if (q.length < 2) return;
+  searchResults.hidden = false;
+  searchResults.replaceChildren(h("div", { class: "msg", text: "Searching" }));
+  try {
+    const response = await fetch(`${API}/api/v1/places?q=${encodeURIComponent(q)}`);
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.detail || `HTTP ${response.status}`);
+    if (!body.results.length) {
+      searchResults.replaceChildren(h("div", { class: "msg", text: `Nothing found for “${q}”.` }));
+      return;
+    }
+    searchResults.replaceChildren(...body.results.map((place) => h("button", {
+      type: "button",
+      onclick: () => {
+        hideSearchResults();
+        if (place.bbox) {
+          // A village's own box is often a few hundred metres; open a little wider so
+          // the valleys around it are in view before the reader draws.
+          const [w, s2, e, n] = place.bbox, pad = Math.max(0.01, (e - w) * 0.5);
+          fitBounds([w - pad, s2 - pad, e + pad, n + pad]);
+        } else {
+          fitBounds([place.lon - 0.02, place.lat - 0.02, place.lon + 0.02, place.lat + 0.02]);
+        }
+        if (!aoi.ring) setTool("rect");
+      },
+    }, [place.name || place.display_name, h("small", { text: place.display_name })])));
+  } catch (error) {
+    searchResults.replaceChildren(h("div", { class: "msg",
+      text: "Search is unavailable just now. Pan and zoom the map to the village instead." }));
   }
 };
+document.addEventListener("pointerdown", (event) => {
+  if (!searchResults.hidden && !event.target.closest("#search")) hideSearchResults();
+});
+
+/* ---- the sample ---- */
+function useSample() {
+  setMode("area");
+  aoi.kind = "bbox";
+  aoi.ring = rectRing([SAMPLE_BBOX[0], SAMPLE_BBOX[1]], [SAMPLE_BBOX[2], SAMPLE_BBOX[3]]);
+  setTool(null);
+  fitBounds(SAMPLE_BBOX, 90);
+  aoiChanged();
+  runButton.onclick();
+}
+document.getElementById("sample").onclick = () => useSample();
+
+function syncRunButton() {
+  if (typeof runButton === "undefined") return;
+  if (running) { runButton.disabled = true; return; }
+  if (mode === "area") {
+    runButton.textContent = "Analyse this area";
+    runButton.disabled = !!aoiProblem() || !!aoi.drawing;
+    runButton.title = aoiProblem() || "";
+  } else {
+    runButton.textContent = "Analyse";
+    runButton.disabled = !chosen;
+    runButton.title = chosen ? "" : "Choose a contour map first";
+  }
+}
+
+/* ---- running an area, as a job ---- */
+const AREA_STAGES = ["elevation", "flow", "ensemble", "siting", "hydrology", "geojson"];
+const STAGE_TEXT = {
+  queued: "Waiting for a worker", dispatched: "Sent to a worker", elevation: "Fetching elevation tiles",
+  land: "Reading the imagery", flow: "Routing water across the terrain",
+  ensemble: "Cross-checking on three more grids", siting: "Choosing pond sites",
+  hydrology: "Rainfall and runoff", geojson: "Drawing the answer",
+};
+
+function numberField(body, id, name, integer) {
+  const raw = document.getElementById(id).value.trim();
+  if (raw === "") return;
+  const value = Number(raw);
+  if (isFinite(value)) body[name || id] = integer ? Math.round(value) : value;
+}
+
+function workingView(stages) {
+  const meter = h("i", null);
+  meter.style.width = "0%";
+  const label = h("span", { text: "Starting" });
+  const list = h("ul", { class: "stages" }, stages.map((s) => h("li", { "data-stage": s, text: STAGE_TEXT[s] || s })));
+  resultsEl.replaceChildren(h("div", { class: "sec" }, [
+    h("div", { class: "working", style: "padding:0" }, [h("div", { class: "spinner" }), label]),
+    h("div", { class: "meter" }, [meter]),
+    list,
+  ]));
+  return (job) => {
+    const pct = Math.round((job.progress || 0) * 100);
+    meter.style.width = pct + "%";
+    progEl.querySelector("i").style.width = pct + "%";
+    label.textContent = `${job.stage_label || STAGE_TEXT[job.stage] || job.stage} · ${job.elapsed_s.toFixed(1)} s`;
+    const at = stages.indexOf(job.stage);
+    list.querySelectorAll("li").forEach((li, i) => {
+      li.className = job.status === "done" || (at >= 0 && i < at) ? "done" : i === at ? "now" : "";
+    });
+  };
+}
+
+function showFailure(title, body, status) {
+  resultsEl.replaceChildren(h("div", { class: "sec" }, [
+    h("h3", { text: title }),
+    h("div", { class: "note bad" }, [
+      h("b", { text: body.code || `HTTP ${status}` }),
+      body.detail || "The request failed.",
+    ]),
+    body.hint ? h("div", { class: "note info", text: body.hint }) : null,
+  ]));
+}
+
+async function runArea() {
+  const problem = aoiProblem();
+  if (problem) return;
+  const body = aoi.kind === "bbox" ? { bbox: aoiBBox() } : { polygon: aoi.ring };
+  body.ensemble = ensembleBox.checked;
+  numberField(body, "top_n", null, true);
+  numberField(body, "curve_number");
+  numberField(body, "target_depth_m");
+  numberField(body, "rainfall_mm");
+  numberField(body, "grid_resolution");
+  if (pourPoint) { body.lat = pourPoint.lat; body.lon = pourPoint.lon; }
+  if (layerState.avoidLand) body.avoid_unavailable_land = true;
+
+  startRun();
+  const stages = AREA_STAGES.filter((s) => s !== "ensemble" || body.ensemble);
+  if (body.avoid_unavailable_land) stages.splice(1, 0, "land");
+  const update = workingView(stages);
+  progEl.classList.add("det");
+  try {
+    let response = await fetch(API + "/api/v1/jobs", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    let job = await response.json();
+    if (!response.ok) { showFailure("That area could not be analysed", job, response.status); return; }
+    while (job.status !== "done" && job.status !== "failed") {
+      update(job);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      response = await fetch(`${API}/api/v1/jobs/${job.job_id}?include_result=false`);
+      job = await response.json();
+      if (!response.ok) { showFailure("The job was lost", job, response.status); return; }
+    }
+    update(job);
+    if (job.status === "failed") { showFailure("That area could not be analysed", job.error || {}, 500); return; }
+    if (!job.result) job = await (await fetch(`${API}/api/v1/jobs/${job.job_id}`)).json();
+    selectedRank = 1;
+    tab = "sites";
+    lastJob = job;
+    renderResults(job.result, true);
+  } catch (error) {
+    resultsEl.replaceChildren(h("div", { class: "sec" }, [
+      h("h3", { text: "The service did not answer" }),
+      h("div", { class: "note bad", text: String(error) }),
+      h("div", { class: "note info", text: "Is the API running at " + (API || location.origin) + "?" }),
+    ]));
+  } finally {
+    finishRun();
+  }
+}
+let lastJob = null;
+let running = false;
+const layerState = { avoidLand: false };
+function startRun() {
+  running = true;
+  runButton.disabled = true;
+  progEl.classList.add("on");
+  tabsEl.classList.remove("on");
+  features = [];
+  lastBody = null;
+  buildLegend();
+  render();
+}
+function finishRun() {
+  running = false;
+  progEl.classList.remove("on", "det");
+  progEl.querySelector("i").style.width = "";
+  syncRunButton();
+}
 
 /* --------------------------------------------------------------------------
  * Startup
@@ -1853,8 +2461,13 @@ runButton.onclick = async () => {
   try {
     const body = await (await fetch(API + "/health")).json();
     el.className = "up";
-    el.querySelector(".txt").textContent = "API v" + body.version;
+    el.querySelector(".txt").textContent = "API v" + body.version +
+      (body.role === "gateway" ? ` · ${body.workers} workers` : "");
+    healthInfo = body;
+    if (body.max_aoi_area_km2) limits.maxKm2 = body.max_aoi_area_km2;
+    if (body.min_aoi_area_ha) limits.minHa = body.min_aoi_area_ha;
     applyEnsembleCapability(body);
+    syncAoi();
   } catch {
     el.className = "down";
     el.querySelector(".txt").textContent = "API not reachable";
@@ -1870,6 +2483,17 @@ runButton.onclick = async () => {
 // Older builds report neither field and are read as available and on, which is what
 // they were.
 function applyEnsembleCapability(body) {
+  const note = document.getElementById("ensemble-note");
+  if (mode === "area") {
+    // On the map path the grids are small, so the host can always afford the cross-check.
+    ensembleBox.disabled = false;
+    ensembleBox.checked = true;
+    note.textContent = "Repeats the run on three grids around the 17.8 m one for an error bar on " +
+      "the area. Adds well under a second here.";
+    return;
+  }
+  note.textContent = "Repeats the run at 5.0, 3.5 and 2.5 m for an error bar on the area. About three " +
+    "times slower.";
   if (body.ensemble_available === false) {
     ensembleBox.disabled = true;
     document.getElementById("ensemble-note").textContent =
@@ -1877,6 +2501,7 @@ function applyEnsembleCapability(body) {
       + "The area comes back without an error bar and confidence reads unassessed.";
     return;
   }
+  ensembleBox.disabled = false;
   ensembleBox.checked = body.ensemble_default !== false;
 }
 
@@ -1884,7 +2509,11 @@ showEmpty();
 // Central India, where the sample sheet is, so the page opens on ground rather than on
 // an ocean while it waits for a file.
 fitBounds([78.0, 19.0, 84.0, 24.0]);
+document.getElementById("grid_resolution").min = 5;
+document.getElementById("grid_resolution").max = 150;
+applyEnsembleCapability({});
 syncContourButton();
+syncRunButton();
 </script>
 </body>
 </html>
