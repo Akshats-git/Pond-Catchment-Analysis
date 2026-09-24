@@ -26,6 +26,7 @@ from app.routers.analyze import router as analyze_router
 from app.routers.imagery import router as imagery_router
 from app.routers.jobs import router as jobs_router
 from app.routers.places import router as places_router
+from app.routers.ponds import router as ponds_router
 from app.schemas.responses import HealthResponse
 
 __all__ = ["app", "create_app"]
@@ -115,7 +116,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=list(settings.api.cors_allow_origins),
         allow_credentials=False,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
 
@@ -124,6 +125,7 @@ def create_app() -> FastAPI:
     app.include_router(jobs_router, prefix=settings.api.api_prefix)
     app.include_router(places_router, prefix=settings.api.api_prefix)
     app.include_router(imagery_router, prefix=settings.api.api_prefix)
+    app.include_router(ponds_router, prefix=settings.api.api_prefix)
 
     generated = app.openapi
 

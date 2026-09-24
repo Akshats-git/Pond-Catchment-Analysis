@@ -114,6 +114,20 @@
   #health .dot { width: 7px; height: 7px; border-radius: 50%; background: #64748b; flex: none; }
   #health.up .dot { background: #4ade80; }
   #health.down .dot { background: #f87171; }
+  .head-btn {
+    font: inherit; font-size: 12.5px; background: none; border: 1px solid #2d4252; color: #cfe3f1;
+    border-radius: 14px; padding: 3px 11px; cursor: pointer;
+  }
+  .head-btn:hover { border-color: #a9d3ee; color: #fff; }
+
+  .toolbar { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--line-soft); }
+  .toolbar button.btn { height: 28px; font-size: 12.5px; padding: 0 10px; }
+  .saved-item { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--line-soft); }
+  .saved-item:last-child { border-bottom: 0; }
+  .saved-item .meta { flex: 1; min-width: 0; }
+  .saved-item .meta b { display: block; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .saved-item .meta span { font-size: 12px; color: var(--muted); }
+  .saved-item button.btn { height: 28px; font-size: 12px; padding: 0 9px; }
 
   /* ---------------- setup bar ---------------- */
   #bar {
@@ -499,6 +513,7 @@
   <h1>Pond Catchment Analysis</h1>
   <span class="spacer"></span>
   <span id="health"><span class="dot"></span><span class="txt">checking</span></span>
+  <button class="head-btn" id="saved-btn">Saved sites</button>
   <a id="docs-link" href="/docs" target="_blank" rel="noopener">API docs</a>
 </header>
 
@@ -1640,9 +1655,95 @@ function siteCard(site, full) {
   ]);
 }
 
+function exportButtons() { return []; }
+
+function resultToolbar() {
+  return h("div", { class: "toolbar" }, [
+    h("button", { class: "btn", text: "Save", title: "Keep this analysis under a name", onclick: saveCurrent }),
+    ...exportButtons(),
+  ]);
+}
+
+async function saveCurrent() {
+  if (!lastBody) return;
+  const suggestion = lastBody.area ? `Area near ${lastBody.recommended_site.location.lat.toFixed(3)}, ${lastBody.recommended_site.location.lon.toFixed(3)}`
+                                   : lastBody.input.filename;
+  const name = prompt("Name this site", suggestion);
+  if (!name) return;
+  const payload = lastJob && lastJob.result === lastBody ? { name, job_id: lastJob.job_id } : { name, response: lastBody };
+  try {
+    const response = await fetch(API + "/api/v1/ponds", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.detail || `HTTP ${response.status}`);
+    toast(`Saved as “${body.name}”`);
+  } catch (error) {
+    toast("Could not save: " + (error.message || error), true);
+  }
+}
+
+function toast(text, bad) {
+  const note = h("div", { class: "note " + (bad ? "bad" : "info"), text });
+  note.style.cssText = "position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:50;box-shadow:var(--shadow)";
+  document.body.appendChild(note);
+  setTimeout(() => note.remove(), 3200);
+}
+
+async function showSaved() {
+  tabsEl.classList.remove("on");
+  resultsEl.replaceChildren(h("div", { class: "working" }, [h("div", { class: "spinner" }), "Loading saved sites"]));
+  let body;
+  try {
+    const response = await fetch(API + "/api/v1/ponds?limit=100");
+    body = await response.json();
+    if (!response.ok) throw new Error(body.detail);
+  } catch (error) {
+    resultsEl.replaceChildren(h("div", { class: "sec" }, [h("div", { class: "note bad", text: "Could not load saved sites." })]));
+    return;
+  }
+  const back = lastBody ? h("button", { class: "btn", text: "Back to the result", onclick: () => renderPanel() }) : null;
+  const items = body.items.map((item) => h("div", { class: "saved-item" }, [
+    h("div", { class: "meta" }, [
+      h("b", { text: item.name }),
+      h("span", { text: `${num(item.summary.catchment_ha, 1)} ha · ${num(item.summary.annual_runoff_m3)} m³/yr · ` +
+        new Date(item.created * 1000).toLocaleDateString() + (item.source === "elevation_tiles" ? " · map" : " · sheet") }),
+    ]),
+    h("button", { class: "btn", text: "Open", onclick: () => openSaved(item.id) }),
+    h("button", { class: "btn", text: "Delete", onclick: async () => {
+      if (!confirm(`Delete “${item.name}”?`)) return;
+      await fetch(`${API}/api/v1/ponds/${item.id}`, { method: "DELETE" });
+      showSaved();
+    } }),
+  ]));
+  resultsEl.replaceChildren(h("div", { class: "sec" }, [
+    h("h3", { text: `Saved sites (${body.total})` }),
+    back,
+    ...(items.length ? items : [h("div", { class: "empty", text: "Nothing saved yet. Analyse an area and press Save." })]),
+  ]));
+}
+
+async function openSaved(id) {
+  const record = await (await fetch(`${API}/api/v1/ponds/${id}`)).json();
+  const body = record.response;
+  if (body.area) {
+    if (mode !== "area") setMode("area");
+    const ring = body.area.geometry.coordinates[0].slice(0, -1);
+    aoi.kind = body.area.kind;
+    aoi.ring = ring;
+    syncAoi();
+  }
+  lastJob = null;
+  selectedRank = 1;
+  tab = "sites";
+  renderResults(body, true);
+  if (body.area && contours.on !== false) { contours.on = true; loadContours(); }
+}
+document.getElementById("saved-btn").onclick = () => showSaved();
+
 function sitesView() {
   const body = lastBody;
-  const parts = [h("div", { class: "sec" }, [
+  const parts = [resultToolbar(), h("div", { class: "sec" }, [
     h("h3", { text: "Recommended site" }),
     siteCard(body.recommended_site, true),
   ])];
