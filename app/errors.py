@@ -82,7 +82,7 @@ def install_handlers(app) -> None:
             )
         problems = "; ".join(
             f"{'.'.join(str(part) for part in error['loc'][1:]) or 'request'}: "
-            f"{error['msg']}"
+            f"{str(error['msg']).removeprefix('Value error, ')}"
             for error in exc.errors()
         )
         return JSONResponse(

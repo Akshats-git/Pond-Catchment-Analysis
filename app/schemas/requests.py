@@ -28,7 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.config import settings
 
-__all__ = ["AnalysisParams"]
+__all__ = ["AnalysisParams", "AreaRequest"]
 
 
 class AnalysisParams(BaseModel):
@@ -172,3 +172,67 @@ class AnalysisParams(BaseModel):
         if self.lat is None or self.lon is None:
             return None
         return (self.lon, self.lat)
+
+
+class AreaRequest(AnalysisParams):
+    """`POST /analyzeArea`: a selection drawn on a map, plus the same knobs as a sheet.
+
+    Exactly one of `bbox`, `polygon` or `geometry`. Everything else means what it means on
+    `/analyzeContour`, with one default changed: the resolution ensemble is on, because on
+    this path the grid is small enough that the error bar costs a fraction of a second.
+    """
+
+    bbox: list[float] | None = Field(
+        default=None,
+        description="[min_lon, min_lat, max_lon, max_lat] of a rectangle drawn on the map.",
+        examples=[[81.2814, 21.2398, 81.3126, 21.2636]],
+    )
+    polygon: list[list[float]] | None = Field(
+        default=None,
+        description="A polygon as [[lon, lat], ...]; closing it is optional.",
+    )
+    geometry: dict | None = Field(
+        default=None, description="A GeoJSON Polygon, or a Feature holding one."
+    )
+    ensemble: bool = Field(
+        default=True,
+        description="Cross-check every site on three more grids. On by default here: the "
+        "grids are small. Skipped with a warning when the selection is too big for it.",
+    )
+    avoid_unavailable_land: bool = Field(
+        default=False,
+        description="Keep the pond off ground the imagery shows is water, buildings or "
+        "tree cover (the land-availability layer). Needs the imagery service.",
+    )
+
+    @model_validator(mode="after")
+    def _one_selection(self) -> "AreaRequest":
+        given = [name for name in ("bbox", "polygon", "geometry") if getattr(self, name) is not None]
+        if len(given) != 1:
+            raise ValueError(
+                "Send exactly one of bbox, polygon or geometry"
+                + (f"; got {', '.join(given)}." if given else "; got none.")
+            )
+        return self
+
+    def area(self):
+        """The selection as an `AreaOfInterest`. Raises `AreaError` on a bad shape."""
+        from app.core.raster_dem import AreaOfInterest
+
+        if self.bbox is not None:
+            return AreaOfInterest.from_bbox(self.bbox)
+        if self.polygon is not None:
+            return AreaOfInterest.from_polygon(self.polygon)
+        return AreaOfInterest.from_geojson(self.geometry)
+
+    def params(self) -> AnalysisParams:
+        """The analysis knobs alone, as the pipeline takes them."""
+        return AnalysisParams(**self.model_dump(include=set(AnalysisParams.model_fields)))
+
+    def cache_key(self) -> str:
+        """A stable hash of everything that changes the answer."""
+        import hashlib
+        import json
+
+        body = self.model_dump(mode="json")
+        return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()[:32]

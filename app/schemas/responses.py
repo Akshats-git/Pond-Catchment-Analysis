@@ -21,6 +21,7 @@ number rather than written alongside it.
 from __future__ import annotations
 
 import math
+from collections import Counter
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -58,9 +59,37 @@ def _r(value: float, places: int = 1) -> float:
 # --------------------------------------------------------------------------- #
 # Components
 # --------------------------------------------------------------------------- #
-class InputSummary(BaseModel):
-    """What the service found in the uploaded file."""
+class AreaSummary(BaseModel):
+    """The selection drawn on the map, and where its heights came from."""
 
+    kind: str = Field(description="bbox or polygon, as it was sent.")
+    selection_bbox: list[float] = Field(description="[min_lon, min_lat, max_lon, max_lat] of what was drawn.")
+    selection_area_ha: float
+    analysed_bbox: list[float] = Field(
+        description="The selection grown by the analysis buffer. Flow is routed over all "
+        "of it so catchments crossing the drawn line are counted in full; the pond is "
+        "kept inside the selection."
+    )
+    analysed_area_ha: float
+    buffer_fraction: float
+    elevation_source: str
+    tile_zoom: int | None = None
+    tiles: int = Field(description="Elevation tiles read, across every grid the analysis built.")
+    tile_sources: dict[str, int] = Field(
+        description="Where those tiles came from: memory, seed (committed with the "
+        "service), disk (cached earlier), network, or missing."
+    )
+    geometry: dict[str, Any] = Field(description="The selection as a GeoJSON Polygon.")
+
+
+class InputSummary(BaseModel):
+    """What the service found in the uploaded file, or the selection it was given."""
+
+    source: str = Field(
+        default="contour_file",
+        description="contour_file for an uploaded sheet, elevation_tiles for an area "
+        "drawn on the map. The rest of the response has one shape either way.",
+    )
     filename: str
     contour_count: int = Field(description="Contour lines carrying an elevation.")
     vertex_count: int
@@ -298,8 +327,27 @@ class AnalysisResponse(BaseModel):
         description="FeatureCollection: catchment polygons, pond footprint, outlets and "
         "the longest flow path. Loads directly in geojson.io."
     )
+    network: dict[str, Any] | None = Field(
+        default=None,
+        description="The drainage network as LineStrings, one per reach between "
+        "confluences, with `upstream_area_ha` and a `watercourse` flag. The channels a "
+        "pond was allowed to sit on, and the ones it had to stand clear of.",
+    )
+    area: AreaSummary | None = Field(
+        default=None, description="Present when the area was drawn on a map."
+    )
     warnings: list[str] = Field(default_factory=list)
     timing_ms: dict[str, float]
+
+    def with_source_method(self, result: AnalysisResult) -> "AnalysisResponse":
+        """Name the DEM the catchments were traced on, which differs by path."""
+        if result.aoi is not None:
+            for site in [self.recommended_site, *self.alternative_sites]:
+                site.catchment.method = RASTER_METHOD
+        return self
+
+
+RASTER_METHOD = "D8 steepest-descent on SRTM elevation tiles, resampled and smoothed"
 
 
 class ContourResponse(BaseModel):
@@ -586,14 +634,10 @@ def contour_response(
     )
 
 
-def analysis_response(result: AnalysisResult) -> AnalysisResponse:
-    """`AnalysisResult` -> the JSON body, with nothing computed on the way."""
-    meta = result.contours.metadata
-    dem_meta = result.dem.meta
-    mapped_area_m2 = dem_meta.mapped_area_m2
-
-    return AnalysisResponse(
-        input=InputSummary(
+def _input_summary(result: AnalysisResult, mapped_area_m2: float) -> InputSummary:
+    if result.contours is not None:
+        meta = result.contours.metadata
+        return InputSummary(
             filename=result.filename,
             contour_count=result.contours.line_count,
             vertex_count=result.contours.vertex_count,
@@ -606,7 +650,52 @@ def analysis_response(result: AnalysisResult) -> AnalysisResponse:
             unit_hint=meta.unit_hint,
             skipped_features=meta.skipped_features,
             document_name=meta.document_name,
+        )
+    raw = result.dem.raw_z[result.dem.valid]
+    return InputSummary(
+        source="elevation_tiles",
+        filename=result.filename,
+        contour_count=0,
+        vertex_count=0,
+        elevation_source=result.surface.fetches[0].get("provider", "tiles"),
+        interval_m=None,
+        level_count=0,
+        elevation_range_m=[_r(float(raw.min()), 2), _r(float(raw.max()), 2)],
+        mapped_area_ha=_r(mapped_area_m2 / _HA),
+        bbox=[_r(v, 6) for v in result.aoi.bbox],
+    )
+
+
+def _area_summary(result: AnalysisResult) -> AreaSummary | None:
+    if result.aoi is None:
+        return None
+    surface = result.surface
+    primary = surface.fetches[0] if surface.fetches else {}
+    min_lon, min_lat, max_lon, max_lat = surface.analysed_bbox
+    return AreaSummary(
+        kind=result.aoi.kind,
+        selection_bbox=[_r(v, 6) for v in result.aoi.bbox],
+        selection_area_ha=_r(result.aoi.area_m2 / _HA),
+        analysed_bbox=[_r(v, 6) for v in surface.analysed_bbox],
+        analysed_area_ha=_r(surface.analysed_area_m2 / _HA),
+        buffer_fraction=surface.config.aoi_buffer,
+        elevation_source=surface.provider.description or surface.provider.name,
+        tile_zoom=primary.get("zoom"),
+        tiles=sum(f.get("tiles", 0) for f in surface.fetches),
+        tile_sources=dict(
+            sum((Counter(f.get("tile_sources", {})) for f in surface.fetches), Counter())
         ),
+        geometry=result.aoi.to_geojson(),
+    )
+
+
+def analysis_response(result: AnalysisResult) -> AnalysisResponse:
+    """`AnalysisResult` -> the JSON body, with nothing computed on the way."""
+    dem_meta = result.dem.meta
+    mapped_area_m2 = dem_meta.mapped_area_m2
+
+    return AnalysisResponse(
+        input=_input_summary(result, mapped_area_m2),
         dem=DEMSummary(
             resolution_m=_r(dem_meta.resolution_m, 2),
             resolution_source=dem_meta.resolution_source,
@@ -639,6 +728,8 @@ def analysis_response(result: AnalysisResult) -> AnalysisResponse:
             )
         ),
         geojson=result.geojson,
+        network=result.network,
+        area=_area_summary(result),
         warnings=list(result.warnings),
         timing_ms=result.timings_ms,
-    )
+    ).with_source_method(result)

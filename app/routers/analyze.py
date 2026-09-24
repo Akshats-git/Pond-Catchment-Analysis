@@ -54,11 +54,13 @@ from app.core.geojson import GeoJSONError, contour_drawing
 from app.core.hydrology import HydrologyError
 from app.core.kml_parser import ContourParseError, parse_contours
 from app.core.pond_siting import SitingError
+from app.core.raster_dem import AreaError
 from app.core.render import RenderError, render_png
 from app.errors import APIError
-from app.pipeline import AnalysisError, Stopwatch, analyse
+from app.pipeline import AnalysisError, Stopwatch, analyse, analyse_area
+from app.providers.elevation import ElevationUnavailable
 from app.providers.rainfall import rainfall_for
-from app.schemas.requests import AnalysisParams
+from app.schemas.requests import AnalysisParams, AreaRequest
 from app.schemas.responses import (
     AnalysisResponse,
     ContourResponse,
@@ -153,6 +155,14 @@ _STATUS_BY_CODE: dict[str, int] = {
     "invalid_basemap": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "invalid_frame": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "render_too_large": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    # The map path (Phase 3).
+    "invalid_aoi": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "aoi_too_large": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "aoi_too_small": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "no_site_in_selection": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    # Not the request's fault and not the service's: an upstream source is down.
+    "elevation_unavailable": status.HTTP_503_SERVICE_UNAVAILABLE,
+    "imagery_unavailable": status.HTTP_503_SERVICE_UNAVAILABLE,
 }
 """Codes that are not 400. Everything else the core raises is a file that cannot be
 analysed, which is what 400 means here."""
@@ -165,6 +175,8 @@ _ANALYSIS_ERRORS = (
     GeoJSONError,
     RenderError,
     AnalysisError,
+    AreaError,
+    ElevationUnavailable,
 )
 """Every structured error the pipeline can raise. They share the `(code, detail, hint)`
 shape by construction and not by coincidence. See each module's error class."""
@@ -686,6 +698,93 @@ async def render_map(
             **_warning_header(warnings),
         },
     )
+
+
+_AREA_RESPONSES: dict[int | str, dict] = {
+    422: {"model": ErrorResponse, "description": "Selection or parameters unusable."},
+    503: {"model": ErrorResponse, "description": "Elevation data could not be fetched."},
+    504: {"model": ErrorResponse, "description": "The analysis exceeded the time limit."},
+}
+
+
+def structured(exc) -> APIError:
+    """Any of the pipeline's `(code, detail, hint)` errors, as the HTTP error it means."""
+    return APIError(
+        _STATUS_BY_CODE.get(exc.code, status.HTTP_400_BAD_REQUEST),
+        exc.code,
+        exc.detail,
+        exc.hint,
+    )
+
+
+def area_exclusion(request: AreaRequest):
+    """The land-availability mask for a request that asked to avoid unavailable land."""
+    if not request.avoid_unavailable_land:
+        return None
+    from app.cv.client import unavailable_mask_for
+
+    return unavailable_mask_for
+
+
+def run_area(request: AreaRequest, progress=None):
+    """The whole map-path analysis, synchronously, as the job runner and the route share it."""
+    return analyse_area(
+        request.area(),
+        request.params(),
+        exclusion_mask=area_exclusion(request),
+        progress=progress,
+    )
+
+
+async def analyse_area_guarded(request: AreaRequest):
+    """`run_area` in a worker thread, behind the same semaphore and timeout as a sheet."""
+    try:
+        with anyio.fail_after(settings.api.request_timeout_s):
+            async with _analysis_limiter():
+                return await run_in_threadpool(run_area, request)
+    except TimeoutError as exc:
+        raise APIError(
+            status.HTTP_504_GATEWAY_TIMEOUT,
+            "analysis_timeout",
+            f"The analysis did not finish within {settings.api.request_timeout_s:.0f} s.",
+            "Draw a smaller area, or use the job API (POST /api/v1/jobs), which does not "
+            "hold a connection open while it waits.",
+        ) from exc
+    except _ANALYSIS_ERRORS as exc:
+        raise structured(exc) from exc
+
+
+@router.post(
+    "/analyzeArea",
+    response_model=AnalysisResponse,
+    responses=_AREA_RESPONSES,
+    summary="Analyse an area drawn on the map: pond site, catchment and water volume",
+)
+async def analyze_area(request: AreaRequest) -> AnalysisResponse:
+    """Send a rectangle or polygon drawn on a map. Get back the same answer
+    `/analyzeContour` gives for an uploaded sheet: where the pond goes, what drains into it,
+    and how much water that is worth in an average year.
+
+    Heights come from free SRTM elevation tiles (about 30 m) rather than a survey. The
+    DEM is built for the selection **plus a 25% buffer**, so catchments that cross the
+    line you drew are counted in full; the pond itself is kept inside the selection.
+
+    The response schema is exactly `/analyzeContour`'s, with `input.source` set to
+    `elevation_tiles` and an `area` block describing the selection and the tiles.
+
+    ```json
+    {"bbox": [81.2814, 21.2398, 81.3126, 21.2636]}
+    ```
+
+    A selection over 100 km2 is a `422 aoi_too_large` rather than an attempt that would
+    exhaust the host's memory.
+    """
+    try:
+        request.area().check_size()
+    except AreaError as exc:
+        raise structured(exc) from exc
+    result = await analyse_area_guarded(request)
+    return analysis_response(result)
 
 
 @router.get(
