@@ -49,6 +49,9 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import ValidationError
 
 from app.config import settings
+from dataclasses import replace
+
+from app.core.contouring import ContourError, contours_from_dem, total_length_m
 from app.core.dem_builder import DEMBuildError
 from app.core.geojson import GeoJSONError, contour_drawing
 from app.core.hydrology import HydrologyError
@@ -160,6 +163,7 @@ _STATUS_BY_CODE: dict[str, int] = {
     "aoi_too_large": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "aoi_too_small": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "no_site_in_selection": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "invalid_interval": status.HTTP_422_UNPROCESSABLE_ENTITY,
     # Not the request's fault and not the service's: an upstream source is down.
     "elevation_unavailable": status.HTTP_503_SERVICE_UNAVAILABLE,
     "imagery_unavailable": status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -177,6 +181,7 @@ _ANALYSIS_ERRORS = (
     AnalysisError,
     AreaError,
     ElevationUnavailable,
+    ContourError,
 )
 """Every structured error the pipeline can raise. They share the `(code, detail, hint)`
 shape by construction and not by coincidence. See each module's error class."""
@@ -276,6 +281,41 @@ def _extension_warning(filename: str) -> str | None:
         f"{filename!r} is not named .kml or .kmz; it was parsed by content. Check that "
         "the right file was uploaded."
     )
+
+
+def parse_bbox_field(text: str) -> list[float]:
+    """A bbox sent as a form field: `81.28,21.24,81.31,21.26`, or the same as a JSON list."""
+    cleaned = text.strip().removeprefix("[").removesuffix("]")
+    try:
+        values = [float(part) for part in cleaned.replace(" ", ",").split(",") if part]
+    except ValueError:
+        values = []
+    if len(values) != 4:
+        raise APIError(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "invalid_aoi",
+            f"bbox {text!r} is not four numbers.",
+            "Send bbox=min_lon,min_lat,max_lon,max_lat, for example "
+            "81.2814,21.2398,81.3126,21.2636.",
+        )
+    return values
+
+
+def area_contours(dem, surface, interval_m: float | None):
+    """Contours of a raster DEM, and the DEM relabelled with their spacing and interval so
+    the renderer thins them the way it thins a sheet's."""
+    drawn = contours_from_dem(dem, interval_m=interval_m, bbox=surface.analysed_bbox)
+    length = total_length_m(drawn, dem)
+    spacing = dem.meta.mapped_area_m2 / length if length > 0 else dem.resolution_m
+    relabelled = replace(
+        dem,
+        meta=replace(
+            dem.meta,
+            mean_contour_spacing_m=spacing,
+            contour_interval_m=drawn.metadata.interval_m or 0.0,
+        ),
+    )
+    return drawn, relabelled
 
 
 @router.post(
@@ -411,6 +451,16 @@ async def contours(
         "metres. 0 sends every vertex. Leave it out for the default, which is finer "
         "than the grid the analysis runs on.",
     ),
+    bbox: str | None = Form(
+        None,
+        description="Instead of a file: min_lon,min_lat,max_lon,max_lat of an area on the "
+        "map. Contours are then generated from elevation tiles (FR-2).",
+    ),
+    interval_m: float | None = Form(
+        None,
+        description="Contour interval for bbox mode. Leave it out for a round figure "
+        "giving about 25 lines.",
+    ),
 ) -> ContourResponse:
     """The contour lines in an uploaded sheet, styled and thinned for a map.
 
@@ -437,6 +487,9 @@ async def contours(
             f"simplify_m is {simplify_m}, and it has to be between 0 and 1000 metres.",
             "Leave it out to get the default, which is finer than the analysis grid.",
         )
+
+    if bbox is not None and contour_map is None and file is None:
+        return await _area_contour_response(parse_bbox_field(bbox), simplify_m, interval_m)
 
     upload = _resolve_upload(contour_map, file)
     filename = upload.filename or "upload.kml"
@@ -473,6 +526,39 @@ async def contours(
     if extension is not None:
         response.warnings.insert(0, extension)
     return response
+
+
+async def _area_contour_response(
+    bbox: list[float], simplify_m: float | None, interval_m: float | None
+) -> ContourResponse:
+    """`/contours` for an area on the map: elevation tiles, a DEM, and its contour lines."""
+    from app.core.raster_dem import AreaOfInterest, RasterSurface
+
+    watch = Stopwatch()
+
+    def work():
+        with watch.stage("elevation"):
+            surface = RasterSurface(AreaOfInterest.from_bbox(bbox))
+            dem = surface.sample()
+        with watch.stage("contour"):
+            drawn, _ = area_contours(dem, surface, interval_m)
+        with watch.stage("draw"):
+            tolerance = simplify_m if simplify_m is not None else dem.resolution_m * 0.25
+            return drawn, contour_drawing(drawn, tolerance_m=tolerance)
+
+    try:
+        with anyio.fail_after(settings.api.request_timeout_s):
+            drawn, drawing = await run_in_threadpool(work)
+    except TimeoutError as exc:
+        raise APIError(
+            status.HTTP_504_GATEWAY_TIMEOUT,
+            "analysis_timeout",
+            "Generating the contours did not finish in time.",
+            "Draw a smaller area.",
+        ) from exc
+    except _ANALYSIS_ERRORS as exc:
+        raise structured(exc) from exc
+    return contour_response(drawn, drawing, "selected area", watch.finish())
 
 
 _RENDER_RESPONSES: dict[int | str, dict] = {
@@ -575,6 +661,11 @@ async def render_map(
         None, description="`sheet` for the whole uploaded map, `sites` to zoom to the answer."
     ),
     legend: bool = Form(True, description="Draw the recommended site's numbers on the image."),
+    bbox: str | None = Form(
+        None,
+        description="Instead of a file: min_lon,min_lat,max_lon,max_lat of an area on the "
+        "map, analysed from elevation tiles exactly as /analyzeArea does.",
+    ),
 ) -> Response:
     """The answer as a picture: the catchment, the pond and the ranked sites, drawn over
     satellite imagery and the contour lines they were derived from.
@@ -594,6 +685,41 @@ async def render_map(
     one-at-a-time queue. Ask for the JSON if you want both; the GeoJSON in it draws the
     same map client-side.
     """
+    wanted_frame = (frame or "sheet").lower()
+    if bbox is not None and contour_map is None and file is None:
+        if wanted_frame not in ("sheet", "sites"):
+            raise APIError(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "invalid_frame",
+                f"frame is {wanted_frame!r}; it has to be `sheet` or `sites`.",
+                "`sheet` frames the area you drew, `sites` zooms to the catchments.",
+            )
+        fields = {
+            "bbox": parse_bbox_field(bbox),
+            "grid_resolution": grid_resolution,
+            "top_n": top_n,
+            "lat": lat,
+            "lon": lon,
+            "curve_number": curve_number,
+            "rainfall_mm": rainfall_mm,
+            "rain_days": rain_days,
+            "target_depth_m": target_depth_m,
+            "ensemble": ensemble,
+        }
+        try:
+            request = AreaRequest(**{k: v for k, v in fields.items() if v is not None})
+        except ValidationError as exc:
+            raise APIError(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "invalid_parameters",
+                "; ".join(str(e["msg"]).removeprefix("Value error, ") for e in exc.errors()),
+                "See /docs for each parameter's accepted range.",
+            ) from exc
+        return await _render_area(
+            request, width=width, height=height, basemap=basemap, contours=contours,
+            frame=wanted_frame, legend=legend,
+        )
+
     upload = _resolve_upload(contour_map, file)
     params = _params(
         {
@@ -616,7 +742,6 @@ async def render_map(
             "Send ensemble=false, or omit it. The map is unchanged except that the "
             "catchment area is drawn without its error bar.",
         )
-    wanted_frame = (frame or "sheet").lower()
     if wanted_frame not in ("sheet", "sites"):
         raise APIError(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -785,6 +910,81 @@ async def analyze_area(request: AreaRequest) -> AnalysisResponse:
         raise structured(exc) from exc
     result = await analyse_area_guarded(request)
     return analysis_response(result)
+
+
+def selection_feature(result) -> dict:
+    """The drawn selection as an outline to lay over a rendered map."""
+    return {
+        "type": "Feature",
+        "geometry": result.aoi.to_geojson(),
+        "properties": {
+            "role": "selection", "fill": "#ffffff", "fill-opacity": 0.0,
+            "stroke": "#ffffff",
+        },
+    }
+
+
+def _union_bbox(a, b) -> tuple[float, float, float, float]:
+    return (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
+
+
+async def _render_area(
+    request: AreaRequest, *, width, height, basemap, contours: bool, frame: str, legend: bool
+) -> Response:
+    """`/renderMap` for an area drawn on the map."""
+
+    def work() -> tuple[bytes, list[str]]:
+        result = run_area(request)
+        warnings = list(result.warnings)
+        analysis = dict(result.geojson)
+        analysis["features"] = [selection_feature(result), *result.geojson["features"]]
+        selection = result.aoi.bbox
+        bbox = (
+            _union_bbox(selection, tuple(result.geojson["bbox"]))
+            if frame == "sheet"
+            else tuple(result.geojson["bbox"])
+        )
+        drawing = None
+        dem = result.dem
+        if contours:
+            drawn, dem = area_contours(result.dem, result.surface, None)
+            drawing = contour_drawing(drawn, tolerance_m=result.dem.resolution_m * 0.5)
+        title, rows = _legend_rows(result)
+        png, render_warnings = render_png(
+            analysis=analysis,
+            dem=dem,
+            contours=drawing.geojson if drawing is not None else None,
+            legend_rows=rows if legend else None,
+            legend_title=title,
+            width=width,
+            height=height,
+            basemap=basemap,
+            frame_bbox=bbox,
+            cfg=replace(settings.render, hillshade_credit="Hillshade from SRTM elevation tiles"),
+        )
+        return png, warnings + render_warnings
+
+    try:
+        with anyio.fail_after(settings.api.request_timeout_s):
+            async with _analysis_limiter():
+                png, warnings = await run_in_threadpool(work)
+    except TimeoutError as exc:
+        raise APIError(
+            status.HTTP_504_GATEWAY_TIMEOUT,
+            "analysis_timeout",
+            f"The analysis did not finish within {settings.api.request_timeout_s:.0f} s.",
+            "Draw a smaller area, or ask for a smaller image.",
+        ) from exc
+    except _ANALYSIS_ERRORS as exc:
+        raise structured(exc) from exc
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={
+            "Content-Disposition": 'inline; filename="selected-area-catchment.png"',
+            **_warning_header(warnings),
+        },
+    )
 
 
 @router.get(
