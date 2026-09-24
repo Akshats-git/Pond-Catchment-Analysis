@@ -34,7 +34,7 @@ services:
     <<: *pond
     environment:
       <<: *pond-env
-      POND_JOBS_WORKERS: http://worker1:5000,http://worker2:5000,http://worker3:5000
+      POND_JOBS_WORKERS: ${POND_WORKERS:-http://worker1:5000,http://worker2:5000,http://worker3:5000}
       POND_JOBS_STRATEGY: ${POND_JOBS_STRATEGY:-least_busy}
     # No host port: everything reaches it through the frontend on 5229.
     volumes: ["pond-db:/data"]
