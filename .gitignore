@@ -30,3 +30,8 @@ references/
 # Working notes, kept local
 PLAN.md
 REPORT.md
+
+# Phase 3 runtime state: fetched elevation tiles and the saved-analyses database.
+# data/tiles/ (the committed demo-region seed) is NOT ignored.
+.cache/
+.data/

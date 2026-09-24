@@ -371,6 +371,193 @@ class RainfallConfig:
 
 
 # --------------------------------------------------------------------------- #
+# Elevation tiles (Phase 3)
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class ElevationConfig:
+    """Where the DEM comes from when the user draws an area instead of uploading a sheet.
+
+    The primary source is the AWS terrain-tile bucket in terrarium encoding: free, keyless,
+    reachable from the lab containers, and over the provided survey sheet it reads
+    266-299 m against the survey's 267-298 m (PLAN3 §3.1). Nothing here needs GDAL.
+    """
+
+    provider: str = "terrarium"
+    """`terrarium` (keyless, the default) or `opentopography` (needs `opentopo_key`)."""
+
+    terrarium_url: str = (
+        "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
+    )
+    opentopo_url: str = "https://portal.opentopography.org/API/globaldem"
+    opentopo_key: str = ""
+    """`POND_ELEVATION_OPENTOPO_KEY`. Empty means the provider is not offered."""
+    opentopo_dem_type: str = "SRTMGL1"
+
+    network_enabled: bool = True
+    """Whether tiles may be fetched at all. `false` serves only what is already on disk,
+    which is how the test suite runs and what a demo with no uplink falls back to."""
+
+    source_resolution_m: float = 30.0
+    """Ground resolution of the data *inside* the tiles. Over India that is SRTM's one
+    arc-second. Tiles at z13 are 17.8 m pixels, so finer zooms only resample the same
+    30 m posts; this is what caps the useful zoom and what the smoothing is scaled to."""
+
+    min_zoom: int = 8
+    max_zoom: int = 13
+    """z13 is the first zoom whose pixels are finer than the 30 m source at Indian
+    latitudes (17.8 m at 21 N). Going further fetches four times the tiles for no detail."""
+
+    cell_budget: int = 1_000_000
+    """`POND_ELEVATION_CELL_BUDGET`. The grid grows coarser rather than past this many
+    cells. The Phase 2 sheet was 886,000 cells and peaked near 300 MB, so a million keeps
+    any selection inside the envelope already known to fit a 512 MB container."""
+
+    aoi_buffer: float = 0.25
+    """`POND_ELEVATION_AOI_BUFFER`. The DEM is fetched for the selection grown by this
+    fraction of its span on every side, so catchments that cross the drawn line are counted
+    in full. Water does not respect a rectangle somebody drew (PLAN3 §5.3)."""
+
+    min_buffer_m: float = 300.0
+    """The buffer is never thinner than this, so a small field still sees the slope above it."""
+
+    max_aoi_area_km2: float = 100.0
+    """Hard cap on the *selection*. Past it the request is a named 422, not an OOM."""
+
+    min_aoi_area_ha: float = 2.0
+    """Below this there is no catchment to speak of at a 30 m source resolution."""
+
+    min_resolution_m: float = 5.0
+    max_resolution_m: float = 150.0
+
+    smoothing_sigma_m: float = 8.0
+    """Gaussian sigma applied to the resampled tiles. SRTM heights come in whole metres, so
+    gentle ground is a staircase of flat terraces, the same failure the contour path's
+    smoothing exists for. Chosen against the survey (docs/VALIDATION.md): 8 m leaves the
+    DEM as close to the survey as no smoothing does (RMSE 0.26 m) while turning the
+    ensemble from `low` confidence (61 +/- 36 ha) into `medium` (80 +/- 11 ha); 15 m and
+    more start to move the divides, and the ensemble grids snap onto the trunk channel."""
+
+    max_nodata_fraction: float = 0.2
+    """Share of the analysed grid allowed to have no elevation (missing tiles, sea)."""
+
+    max_tiles: int = 144
+    tile_timeout_s: float = 8.0
+    tile_retries: int = 2
+    tile_workers: int = 8
+    memory_cache_tiles: int = 256
+    """Decoded tiles kept in memory: 256 x 256 float32 is 256 kB each, so 64 MB at most."""
+
+    cache_dir: str = ".cache/tiles"
+    """Writable disk cache, relative to the repo root unless absolute. Tiles never change,
+    so nothing in here ever expires."""
+
+    seed_dir: str = "data/tiles"
+    """Read-only tiles committed with the repository for the demo region, so the demo
+    works with the network down (PLAN3 §10)."""
+
+    ensemble_max_cells: int = 250_000
+    """The raster path can afford the ensemble that the contour path cannot on 512 MB:
+    the sample sheet is 27,000 cells here against 886,000. Above this, it is skipped with
+    a warning rather than refused."""
+
+    ensemble_factors: tuple[float, ...] = (1.6, 1.15, 0.8)
+    """Ensemble grids as multiples of the primary resolution, bracketing it the way the
+    contour path's 5.0 / 3.5 / 2.5 m bracket its 3.1 m."""
+
+    user_agent: str = "PondCatchmentAnalysis/2.0 (+village pond siting; research use)"
+
+
+# --------------------------------------------------------------------------- #
+# Async jobs, dispatch and caching (Phase 3)
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class JobsConfig:
+    """The async job API and the gateway in front of the workers."""
+
+    max_jobs: int = 500
+    """Jobs remembered at once. Oldest finished ones go first."""
+
+    job_ttl_s: float = 3600.0
+    """How long a finished job's result can still be polled."""
+
+    max_queued: int = 32
+    """Jobs waiting for a worker before a new one is refused with 503 `busy`. A queue
+    longer than this cannot clear inside a user's patience, and saying so is better than
+    accepting work that will time out."""
+
+    result_cache_size: int = 64
+    """Completed area analyses kept by request hash. A repeated selection is a lookup."""
+
+    workers: tuple[str, ...] = ()
+    """`POND_JOBS_WORKERS=http://172.17.0.31:5000,...`. Empty runs every job in this
+    process. Set, this process becomes the gateway and dispatches to those workers."""
+
+    strategy: str = "least_busy"
+    """`least_busy` or `round_robin`. Measured against each other in docs/SCALING.md."""
+
+    worker_slots: int = 1
+    """Analyses each worker runs at once. One, for the same reason as
+    `max_concurrent_analyses`: two at once on 512 MB kill both."""
+
+    worker_timeout_s: float = 150.0
+    worker_poll_s: float = 0.5
+    health_interval_s: float = 5.0
+    """How often the gateway re-checks a worker it marked down."""
+
+
+@dataclass(frozen=True)
+class PlacesConfig:
+    """Place search, proxied to Nominatim so the browser never calls it directly."""
+
+    enabled: bool = True
+    url: str = "https://nominatim.openstreetmap.org/search"
+    timeout_s: float = 6.0
+    cache_size: int = 256
+    max_results: int = 8
+    user_agent: str = "PondCatchmentAnalysis/2.0 (+village pond siting; research use)"
+    """Nominatim's usage policy requires an identifying User-Agent and at most one request
+    a second. The cache plus `min_interval_s` keep a lab full of graders inside it."""
+    min_interval_s: float = 1.0
+    country_codes: str = ""
+    """Optional `in` to keep results inside India. Empty searches everywhere."""
+
+
+@dataclass(frozen=True)
+class CVConfig:
+    """Satellite-imagery analysis: existing water and land availability (Phase 23)."""
+
+    service_url: str = ""
+    """`POND_CV_SERVICE_URL`. Empty runs the CV in-process; set, it is called over HTTP,
+    which is the HLD's separate container 3."""
+
+    imagery_zoom: int = 16
+    """About 2.2 m pixels at 21 N: a village pond is tens of pixels across."""
+
+    max_tiles: int = 400
+    water_min_area_m2: float = 150.0
+    """Smaller dark blobs are shadows, tanks or roofs, not a pond."""
+    water_max_brightness: float = 0.42
+    water_max_exg: float = 0.02
+    """Water is dark and not green. See `app/cv/imagery.py` for how each is measured."""
+    vegetation_min_exg: float = 0.06
+    builtup_min_brightness: float = 0.55
+    builtup_max_saturation: float = 0.18
+    texture_window_px: int = 7
+
+
+@dataclass(frozen=True)
+class StoreConfig:
+    """Saved analyses (FR-9)."""
+
+    path: str = ".data/ponds.sqlite3"
+    """SQLite file, relative to the repo root unless absolute. One file, no server, and
+    the standard library already speaks it."""
+
+    max_saved: int = 1000
+    max_name_length: int = 120
+
+
+# --------------------------------------------------------------------------- #
 # GeoJSON export
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
@@ -581,6 +768,11 @@ class Settings:
     geojson: GeoJSONConfig = field(default_factory=GeoJSONConfig)
     render: RenderConfig = field(default_factory=RenderConfig)
     api: APIConfig = field(default_factory=APIConfig)
+    elevation: ElevationConfig = field(default_factory=ElevationConfig)
+    jobs: JobsConfig = field(default_factory=JobsConfig)
+    places: PlacesConfig = field(default_factory=PlacesConfig)
+    cv: CVConfig = field(default_factory=CVConfig)
+    store: StoreConfig = field(default_factory=StoreConfig)
 
 
 def _coerce(raw: str, current: Any) -> Any:
@@ -627,6 +819,11 @@ def load_settings() -> Settings:
         geojson=_from_env(GeoJSONConfig, "geojson"),
         render=_from_env(RenderConfig, "render"),
         api=_from_env(APIConfig, "api"),
+        elevation=_from_env(ElevationConfig, "elevation"),
+        jobs=_from_env(JobsConfig, "jobs"),
+        places=_from_env(PlacesConfig, "places"),
+        cv=_from_env(CVConfig, "cv"),
+        store=_from_env(StoreConfig, "store"),
     )
 
 

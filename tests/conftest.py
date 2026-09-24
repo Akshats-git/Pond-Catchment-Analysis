@@ -15,3 +15,7 @@ from __future__ import annotations
 import os
 
 os.environ.setdefault("POND_RAINFALL_ENABLED", "false")
+
+# The same rule for elevation tiles: the demo region is committed under `data/tiles/`, and
+# every other test builds its tiles from a formula. Nothing is fetched.
+os.environ.setdefault("POND_ELEVATION_NETWORK_ENABLED", "false")
