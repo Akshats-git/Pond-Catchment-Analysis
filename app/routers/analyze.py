@@ -904,12 +904,39 @@ async def analyze_area(request: AreaRequest) -> AnalysisResponse:
     A selection over 100 km2 is a `422 aoi_too_large` rather than an attempt that would
     exhaust the host's memory.
     """
+    from app.jobs import BusyError, dispatcher
+
     try:
         request.area().check_size()
     except AreaError as exc:
         raise structured(exc) from exc
-    result = await analyse_area_guarded(request)
-    return analysis_response(result)
+
+    d = dispatcher()
+    key = request.cache_key()
+    if d.role == "gateway":
+        # The gateway never analyses: it hands the work to a worker as a job and waits
+        # for it here, so a synchronous client and a polling one share one queue.
+        try:
+            job = d.submit(request.model_dump(mode="json"), key)
+        except BusyError as exc:
+            raise APIError(
+                status.HTTP_503_SERVICE_UNAVAILABLE, "busy", str(exc),
+                "Every worker is busy. Try again in a minute, or use POST /api/v1/jobs.",
+            ) from exc
+        deadline = asyncio.get_running_loop().time() + settings.jobs.worker_timeout_s + 5
+        while job.finished is None and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.05)
+        if job.status == "done":
+            return AnalysisResponse.model_validate(job.result)
+        error = job.error or {"status": 504, "code": "analysis_timeout", "detail": "Timed out.", "hint": ""}
+        raise APIError(error["status"], error["code"], error["detail"], error["hint"])
+
+    cached = d.store.cached(key)
+    if cached is not None:
+        return AnalysisResponse.model_validate(cached)
+    response = analysis_response(await analyse_area_guarded(request))
+    d.store.remember(key, response.model_dump(mode="json"))
+    return response
 
 
 def selection_feature(result) -> dict:

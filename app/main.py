@@ -23,6 +23,8 @@ from app.config import settings
 from app.errors import install_handlers
 from app.routers.analyze import UPLOAD_FIELD, UPLOAD_FIELD_ALIAS
 from app.routers.analyze import router as analyze_router
+from app.routers.jobs import router as jobs_router
+from app.routers.places import router as places_router
 from app.schemas.responses import HealthResponse
 
 __all__ = ["app", "create_app"]
@@ -118,6 +120,8 @@ def create_app() -> FastAPI:
 
     install_handlers(app)
     app.include_router(analyze_router, prefix=settings.api.api_prefix)
+    app.include_router(jobs_router, prefix=settings.api.api_prefix)
+    app.include_router(places_router, prefix=settings.api.api_prefix)
 
     generated = app.openapi
 
@@ -140,12 +144,19 @@ def create_app() -> FastAPI:
         It also carries what the host can afford, because the demo page asks this once on
         load and has nowhere else to learn it.
         """
+        from app.jobs import dispatcher
+
+        d = dispatcher()
         return HealthResponse(
             status="ok",
             service=settings.api.title,
             version=settings.api.version,
             ensemble_available=settings.api.allow_ensemble,
             ensemble_default=settings.api.default_ensemble and settings.api.allow_ensemble,
+            role=d.role,
+            workers=len(d.workers),
+            max_aoi_area_km2=settings.elevation.max_aoi_area_km2,
+            min_aoi_area_ha=settings.elevation.min_aoi_area_ha,
         )
 
     @app.get("/", include_in_schema=False)

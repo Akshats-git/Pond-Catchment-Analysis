@@ -446,6 +446,13 @@ class HealthResponse(BaseModel):
     """Whether an ordinary request runs the ensemble, so the switch opens the way the API
     behaves rather than the way the HTML was written."""
 
+    role: str = "worker"
+    """`worker` runs analyses itself; `gateway` dispatches them to `workers` others."""
+    workers: int = 0
+    max_aoi_area_km2: float = 100.0
+    """The largest selection the map path accepts, so the page can warn before sending."""
+    min_aoi_area_ha: float = 2.0
+
 
 # --------------------------------------------------------------------------- #
 # Builders
