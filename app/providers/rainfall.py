@@ -77,6 +77,13 @@ class RainfallSeries:
     description: str = ""
     warnings: tuple[str, ...] = ()
 
+    monthly_mm: tuple[float, ...] | None = None
+    """Mean rainfall in each calendar month, January first, across the record. `None` for
+    the climatology, whose days are a statistical spread and have no dates."""
+
+    annual_mm: tuple[tuple[int, float], ...] | None = None
+    """(year, total) for every year of the record: the spread a single mean hides."""
+
     years: float = 1.0
     """How many years the record spans.
 
@@ -263,6 +270,14 @@ class OpenMeteoRainfallProvider(RainfallProvider):
             raise RainfallUnavailable("Open-Meteo returned an unusable record.")
 
         wet = values[values >= self.config.wet_day_threshold_mm]
+        months = np.array([int(stamp[5:7]) for stamp in stamps])
+        year_of = np.array([int(stamp[:4]) for stamp in stamps])
+        monthly = tuple(
+            round(float(values[months == m].sum()) / years, 1) for m in range(1, 13)
+        )
+        annual = tuple(
+            (int(y), round(float(values[year_of == y].sum()), 1)) for y in sorted(set(year_of.tolist()))
+        )
         if wet.size == 0:
             raise RainfallUnavailable(
                 f"Open-Meteo records no day over "
@@ -277,6 +292,8 @@ class OpenMeteoRainfallProvider(RainfallProvider):
         return RainfallSeries(
             daily_mm=wet,
             years=float(years),
+            monthly_mm=monthly,
+            annual_mm=annual,
             source=f"Open-Meteo ERA5 daily records, {years} years",
             is_measured=True,
             description=(

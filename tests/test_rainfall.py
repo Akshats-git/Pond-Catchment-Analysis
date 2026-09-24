@@ -252,3 +252,21 @@ def test_the_documented_fallback_is_unchanged_by_all_of_this():
         settings.hydrology.default_annual_rainfall_mm
     )
     assert series.rain_days == settings.hydrology.default_rain_days
+
+
+def test_the_record_carries_its_months_and_years(provider):
+    """For the page's rainfall chart: monthly means and the year-by-year totals."""
+    body = payload()
+    series = provider.parse(body, 81.29, 21.25)
+    assert len(series.monthly_mm) == 12
+    # Every millimetre in the record lands in exactly one month and one year.
+    total = sum(0.0 if d is None else d for d in body["daily"]["precipitation_sum"])
+    assert sum(series.monthly_mm) * series.years == pytest.approx(total, abs=1.0)
+    assert sum(mm for _, mm in series.annual_mm) == pytest.approx(total, abs=1.0)
+    assert [y for y, _ in series.annual_mm] == sorted({int(s[:4]) for s in body["daily"]["time"]})
+
+
+def test_the_climatology_has_no_months_to_show():
+    from app.providers.rainfall import DefaultRainfallProvider
+
+    assert DefaultRainfallProvider().daily_series(81.29, 21.25).monthly_mm is None

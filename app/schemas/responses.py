@@ -417,6 +417,13 @@ class RainfallResponse(BaseModel):
         "climatology answered instead."
     )
     description: str
+    monthly_mm: list[float] | None = Field(
+        default=None,
+        description="Mean rainfall in each month, January first. Null for the climatology.",
+    )
+    annual_totals: list[dict] | None = Field(
+        default=None, description="[{year, mm}] for each year of the record."
+    )
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -606,6 +613,10 @@ def rainfall_response(
         source=series.source,
         is_measured=series.is_measured,
         description=series.description,
+        monthly_mm=list(series.monthly_mm) if series.monthly_mm else None,
+        annual_totals=(
+            [{"year": y, "mm": mm} for y, mm in series.annual_mm] if series.annual_mm else None
+        ),
         warnings=list(series.warnings),
     )
 

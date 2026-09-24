@@ -494,10 +494,80 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
+  /* layers popover */
+  #layers-btn .caret { font-size: 9px; opacity: .7; }
+  #layer-menu {
+    position: absolute; top: 90px; right: 12px; z-index: 7; width: 236px; padding: 8px 10px;
+  }
+  #layer-menu label { display: flex; align-items: center; gap: 8px; font-size: 12.5px; padding: 4px 0; cursor: pointer; }
+  #layer-menu label input { accent-color: var(--accent); margin: 0; }
+  #layer-menu label.off { color: var(--muted); cursor: default; }
+  #layer-menu .sw { width: 14px; height: 9px; border-radius: 2px; flex: none; }
+  #layer-menu small { color: var(--muted); margin-left: auto; font-size: 11px; }
+  #layer-menu h4 { margin: 4px 0 2px; font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+  #zoom { top: 130px; }
+
+  /* headline tiles */
+  .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 14px 16px 4px; }
+  .kpi { border: 1px solid var(--line); border-radius: var(--radius); padding: 9px 10px; background: var(--raised); min-width: 0; }
+  .kpi .k { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 700; }
+  .kpi .v { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 3px; line-height: 1.2; }
+  .kpi .v small { font-size: 11.5px; font-weight: 500; color: var(--muted); }
+  .kpi .s { font-size: 11px; color: var(--muted); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* charts */
+  .chart { width: 100%; height: auto; display: block; margin-top: 4px; overflow: visible; }
+  .chart text { font: 10px system-ui, sans-serif; fill: var(--muted); }
+  .chart .axis { stroke: var(--line); }
+  .chart .bar { fill: var(--accent); }
+  .chart .bar.dim { fill: var(--accent); opacity: .45; }
+  .chart .line { fill: none; stroke: var(--accent); stroke-width: 2; }
+  .chart .line2 { fill: none; stroke: var(--warn); stroke-width: 1.5; stroke-dasharray: 4 3; }
+  .chart .dot { fill: var(--accent); }
+  .chart .mean { stroke: var(--ink-soft); stroke-dasharray: 3 3; }
+  .chart .mark { stroke: var(--bad); stroke-dasharray: 4 3; }
+  .chart-key { font-size: 11px; color: var(--muted); margin-top: 4px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .chart-key i { display: inline-block; width: 14px; height: 0; border-top: 2px solid var(--accent); vertical-align: middle; margin-right: 4px; }
+  .chart-key i.b { border-top: 1.5px dashed var(--warn); }
+
   @media (max-width: 980px) {
     main { flex-direction: column; }
     #map { height: 46vh; flex: none; }
     #panel { width: auto; border-left: 0; border-top: 1px solid var(--line); flex: 1; }
+  }
+  @media (max-width: 640px) {
+    body { overflow: auto; height: auto; }
+    header { padding: 0 10px; }
+    header h1 { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    #docs-link, #health .txt { display: none; }
+    .head-btn { white-space: nowrap; }
+    #bar { gap: 8px 10px; padding: 8px 10px; }
+    #bar .spacer, #derived { display: none; }
+    #area-ctl, #sheet-ctl { width: 100%; }
+    .search { flex: 1 1 100%; }
+    .search input { width: 100%; }
+    #mode button { padding: 0 8px; font-size: 12.5px; }
+    button.primary { width: 100%; }
+    main { display: block; }
+    #map { height: 58vh; }
+    #panel { min-height: 40vh; }
+    #results { overflow: visible; }
+    #legend { display: none; }
+    #layers button { padding: 6px 9px; }
+    .kpis { grid-template-columns: 1fr 1fr; }
+  }
+
+  /* A printed page is the map and the answer, not the controls around them. */
+  @media print {
+    body { display: block; height: auto; overflow: visible; background: #fff; color: #000; }
+    header .spacer, #health, #docs-link, #saved-btn, #bar, .map-ui:not(#legend), #scale, .toolbar, #tabs, #banner { display: none !important; }
+    main { display: block; }
+    #map { height: 13cm; width: 100%; break-inside: avoid; }
+    #panel { width: 100%; border: 0; }
+    #results { overflow: visible; }
+    .card { break-inside: avoid; }
+    details.more { display: block; }
+    details.more > * { display: block; }
   }
 </style>
 </head>
@@ -612,6 +682,13 @@
           times slower.
         </div>
       </div>
+      <div class="f" id="avoid-wrap">
+        <label class="check">
+          <input type="checkbox" id="avoid-land">
+          <span>Keep the pond off water, buildings and trees</span>
+        </label>
+        <div class="sub">Reads the satellite imagery for the area first. Adds a second or two.</div>
+      </div>
       <div class="f">
         <label class="k">Pour point</label>
         <div class="row">
@@ -640,12 +717,23 @@
     <div id="layers" class="map-ui">
       <button data-layer="satellite" class="on">Satellite</button>
       <button data-layer="street">Street</button>
+      <button data-layer="hillshade" title="Esri world hillshade: the shape of the ground">Terrain</button>
     </div>
     <div id="overlays" class="map-ui">
       <button id="contour-toggle" disabled title="Choose a contour map first">
         <span class="pip" aria-hidden="true"></span>
         <span class="txt">Contours</span>
       </button>
+      <button id="layers-btn" aria-expanded="false">Layers <span class="caret">&#9662;</span></button>
+    </div>
+    <div id="layer-menu" class="map-ui" hidden>
+      <h4>The answer</h4>
+      <label><input type="checkbox" data-layer-toggle="answer" checked><span class="sw" style="background:#a6cee3;border:1.5px solid #1f78b4"></span>Catchments and ponds</label>
+      <label><input type="checkbox" data-layer-toggle="alternatives" checked><span class="sw" style="background:#9ecae1"></span>Alternative sites</label>
+      <label><input type="checkbox" data-layer-toggle="network" checked><span class="sw" style="background:#4aa3df;height:3px"></span>Flow network</label>
+      <h4>From the imagery</h4>
+      <label><input type="checkbox" data-layer-toggle="water"><span class="sw" style="background:#38bdf8"></span>Existing water<small></small></label>
+      <label><input type="checkbox" data-layer-toggle="land"><span class="sw" style="background:#f87171"></span>Unavailable land<small></small></label>
     </div>
     <div id="zoom" class="map-ui">
       <button id="zoom-in" title="Zoom in">+</button>
@@ -700,6 +788,12 @@ const LAYERS = {
     url: (z, x, y) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`,
     max: 19,
     credit: "&copy; OpenStreetMap contributors",
+  },
+  hillshade: {
+    url: (z, x, y) =>
+      `https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/${z}/${y}/${x}`,
+    max: 16,
+    credit: "Hillshade &copy; Esri, USGS, NGA, NASA",
   },
 };
 
@@ -1050,6 +1144,7 @@ function drawOrder(list) {
     const selected = f.properties.rank === selectedRank;
     if (role === "catchment") return selected ? 1 : 0;
     if (role === "pond") return selected ? 3 : 2;
+    if (role === "stream") return 3.5;
     if (role === "flow_path") return 4;
     return 5;
   };
@@ -1062,6 +1157,7 @@ function renderOverlay() {
   overlayEl.setAttribute("width", w);
   overlayEl.setAttribute("height", h);
   overlayEl.replaceChildren();
+  drawImageryLayers();
   drawAoiOutline();
 
   // With contours underneath, the catchment fill stops being the thing that shows where
@@ -1071,7 +1167,7 @@ function renderOverlay() {
 
   let selectedLabel = null;
 
-  for (const feature of drawOrder(features)) {
+  for (const feature of drawOrder(visibleFeatures())) {
     const props = feature.properties || {};
     const geometry = feature.geometry;
     if (!geometry || !geometry.coordinates) continue;
@@ -1123,7 +1219,7 @@ function renderOverlay() {
         fill: "none",
         stroke: props.stroke || "#e31a1c",
         "stroke-width": props["stroke-width"] || 2,
-        "stroke-opacity": selected ? 0.95 : 0.35,
+        "stroke-opacity": props.role === "stream" ? (props["stroke-opacity"] ?? 0.85) : selected ? 0.95 : 0.35,
         "stroke-linecap": "round",
         "stroke-linejoin": "round",
       }), describe(props)));
@@ -1229,14 +1325,15 @@ function formatArea(value) {
 
 const ROLE_LABEL = {
   catchment: "Catchment", pond: "Pond at capacity", flow_path: "Longest flow path",
-  pond_site: "Pond site",
+  pond_site: "Pond site", stream: "Stream", existing_water: "Existing water",
+  land_unavailable: "Unavailable land",
 };
 function describe(props) {
   const lines = [];
   const label = ROLE_LABEL[props.role] || props.role;
   lines.push(props.rank ? `${label}, site ${props.rank}` : label);
   const skip = new Set(["role", "rank", "stroke", "fill", "fill-opacity", "stroke-width",
-                        "marker-color", "marker-symbol", "warnings"]);
+                        "stroke-opacity", "marker-color", "marker-symbol", "warnings", "centroid"]);
   for (const key in props) {
     if (skip.has(key) || props[key] == null) continue;
     lines.push(`${key.replace(/_/g, " ")}: ${props[key]}`);
@@ -1655,7 +1752,310 @@ function siteCard(site, full) {
   ]);
 }
 
-function exportButtons() { return []; }
+/* --------------------------------------------------------------------------
+ * Layers
+ * ----------------------------------------------------------------------- */
+const layerState = { answer: true, alternatives: true, network: true, water: false, land: false, avoidLand: false };
+const imageryLayers = {
+  water: { key: null, data: null, loading: false, error: null, path: "/api/v1/imagery/detectPonds" },
+  land: { key: null, data: null, loading: false, error: null, path: "/api/v1/land/available" },
+};
+
+function visibleFeatures() {
+  let list = layerState.answer
+    ? features.filter((f) => layerState.alternatives || !(f.properties.rank > 1))
+    : [];
+  if (layerState.network && lastBody && lastBody.network) list = list.concat(lastBody.network.features);
+  return list;
+}
+
+// What the imagery layers read: the drawn area, or the sheet an analysis covered.
+function imageryExtent() {
+  if (mode === "area" && aoi.ring && !aoiProblem()) {
+    return { key: aoiKey(), body: aoi.kind === "bbox" ? { bbox: aoiBBox() } : { polygon: aoi.ring } };
+  }
+  if (lastBody) {
+    const b = lastBody.area ? lastBody.area.selection_bbox : lastBody.input.bbox;
+    return { key: "bbox:" + b.join(","), body: { bbox: b } };
+  }
+  return null;
+}
+
+async function loadImagery(kind) {
+  const layer = imageryLayers[kind];
+  const extent = imageryExtent();
+  if (!extent) { layer.error = "Draw an area first"; syncLayerMenu(); return; }
+  if (layer.key === extent.key && (layer.data || layer.loading)) return;
+  layer.key = extent.key;
+  layer.loading = true;
+  layer.error = null;
+  layer.data = null;
+  syncLayerMenu();
+  try {
+    const response = await fetch(API + layer.path, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(extent.body),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.detail || `HTTP ${response.status}`);
+    if (layer.key === extent.key) layer.data = body;
+  } catch (error) {
+    layer.error = String(error.message || error);
+  } finally {
+    layer.loading = false;
+    syncLayerMenu();
+    buildLegend();
+    render();
+  }
+}
+
+function refreshImagery() {
+  for (const kind of ["water", "land"]) if (layerState[kind]) loadImagery(kind);
+}
+
+function syncLayerMenu() {
+  for (const input of document.querySelectorAll("[data-layer-toggle]")) {
+    const kind = input.dataset.layerToggle;
+    input.checked = !!layerState[kind];
+    const note = input.parentNode.querySelector("small");
+    if (!note) continue;
+    const layer = imageryLayers[kind];
+    note.textContent = !layerState[kind] ? "" : layer.loading ? "reading" : layer.error ? "failed"
+      : !layer.data ? "" : kind === "water" ? `${layer.data.count} found`
+      : `${Math.round(layer.data.available_share * 100)}% free`;
+    note.title = layer.error || "";
+  }
+}
+
+for (const input of document.querySelectorAll("[data-layer-toggle]")) {
+  input.onchange = () => {
+    const kind = input.dataset.layerToggle;
+    layerState[kind] = input.checked;
+    if (input.checked && imageryLayers[kind]) loadImagery(kind);
+    syncLayerMenu();
+    buildLegend();
+    render();
+  };
+}
+const layerMenu = document.getElementById("layer-menu");
+const layersButton = document.getElementById("layers-btn");
+layersButton.onclick = () => {
+  layerMenu.hidden = !layerMenu.hidden;
+  layersButton.classList.toggle("on", !layerMenu.hidden);
+  layersButton.setAttribute("aria-expanded", String(!layerMenu.hidden));
+};
+document.addEventListener("pointerdown", (event) => {
+  if (!layerMenu.hidden && !event.target.closest("#layer-menu") && !event.target.closest("#layers-btn")) {
+    layerMenu.hidden = true;
+    layersButton.classList.remove("on");
+  }
+});
+
+function drawImageryLayers() {
+  for (const kind of ["land", "water"]) {
+    const data = layerState[kind] && imageryLayers[kind].data;
+    if (!data) continue;
+    for (const feature of data.geojson.features) {
+      const props = feature.properties;
+      overlayEl.appendChild(tip(svg("path", {
+        d: polygonPath(feature.geometry), "fill-rule": "evenodd",
+        fill: props.fill, "fill-opacity": props["fill-opacity"] ?? 0.35,
+        stroke: props.stroke, "stroke-width": 1.2, "stroke-opacity": 0.9,
+      }), describe(props)));
+    }
+  }
+}
+
+document.getElementById("avoid-land").onchange = (event) => { layerState.avoidLand = event.target.checked; };
+
+/* --------------------------------------------------------------------------
+ * Charts, drawn as SVG by hand: no chart library, no CDN, nothing to load.
+ * ----------------------------------------------------------------------- */
+function niceMax(value) {
+  if (!(value > 0)) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(value)));
+  return [1, 2, 2.5, 5, 10].find((f) => f * p >= value) * p;
+}
+function compact(value) {
+  return value >= 1e6 ? num(value / 1e6, 1) + "M" : value >= 1e4 ? num(value / 1e3) + "k" : num(value);
+}
+
+function barChart(values, labels, { mean, unit, highlight } = {}) {
+  const W = 330, H = 138, L = 34, B = 18, T = 8;
+  const top = niceMax(Math.max(...values, mean || 0));
+  const el = svg("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img" });
+  const bw = (W - L - 4) / values.length;
+  for (const f of [0, 0.5, 1]) {
+    const y = T + (H - B - T) * (1 - f);
+    el.appendChild(svg("line", { x1: L, x2: W, y1: y, y2: y, class: "axis" }));
+    const t = svg("text", { x: L - 4, y: y + 3, "text-anchor": "end" }); t.textContent = compact(top * f); el.appendChild(t);
+  }
+  values.forEach((v, i) => {
+    const h2 = (H - B - T) * v / top;
+    const bar = svg("rect", { x: L + i * bw + bw * 0.14, y: T + (H - B - T) - h2, width: bw * 0.72, height: Math.max(h2, 0.5),
+                              rx: 1.5, class: "bar" + (highlight && !highlight(i) ? " dim" : "") });
+    tip(bar, `${labels[i]}: ${num(v)} ${unit || ""}`);
+    el.appendChild(bar);
+    if (values.length <= 12 || i % 2 === 0) {
+      const t = svg("text", { x: L + i * bw + bw / 2, y: H - 5, "text-anchor": "middle" }); t.textContent = labels[i]; el.appendChild(t);
+    }
+  });
+  if (mean) {
+    const y = T + (H - B - T) * (1 - mean / top);
+    el.appendChild(svg("line", { x1: L, x2: W, y1: y, y2: y, class: "mean" }));
+  }
+  return el;
+}
+
+function curveChart(xs, ys, ys2, { xfmt, yfmt, y2fmt, markX } = {}) {
+  const W = 330, H = 150, L = 40, R = ys2 ? 38 : 8, B = 20, T = 8;
+  const xMax = Math.max(...xs) || 1, yMax = niceMax(Math.max(...ys)), y2Max = ys2 ? niceMax(Math.max(...ys2)) : 1;
+  const X = (v) => L + (W - L - R) * v / xMax, Y = (v, m) => T + (H - B - T) * (1 - v / m);
+  const el = svg("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img" });
+  for (const f of [0, 0.5, 1]) {
+    const y = Y(yMax * f, yMax);
+    el.appendChild(svg("line", { x1: L, x2: W - R, y1: y, y2: y, class: "axis" }));
+    const t = svg("text", { x: L - 4, y: y + 3, "text-anchor": "end" }); t.textContent = yfmt(yMax * f); el.appendChild(t);
+    if (ys2) { const t2 = svg("text", { x: W - R + 4, y: y + 3 }); t2.textContent = y2fmt(y2Max * f); el.appendChild(t2); }
+  }
+  for (const f of [0, 0.5, 1]) {
+    const t = svg("text", { x: X(xMax * f), y: H - 5, "text-anchor": "middle" }); t.textContent = xfmt(xMax * f); el.appendChild(t);
+  }
+  const path = (vals, m) => vals.map((v, i) => (i ? "L" : "M") + X(xs[i]).toFixed(1) + " " + Y(v, m).toFixed(1)).join("");
+  if (ys2) el.appendChild(svg("path", { d: path(ys2, y2Max), class: "line2" }));
+  el.appendChild(svg("path", { d: path(ys, yMax), class: "line" }));
+  xs.forEach((x, i) => el.appendChild(tip(svg("circle", { cx: X(x), cy: Y(ys[i], yMax), r: 2.6, class: "dot" }),
+    `${xfmt(x)}: ${yfmt(ys[i])}` + (ys2 ? `, ${y2fmt(ys2[i])}` : ""))));
+  if (markX != null) {
+    el.appendChild(svg("line", { x1: X(markX), x2: X(markX), y1: T, y2: H - B, class: "mark" }));
+  }
+  return el;
+}
+
+const MONTHS = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
+const rainCache = new Map();
+
+function rainfallCharts(site) {
+  const box = h("div", null, [h("div", { class: "working", style: "padding:6px 0" }, [h("div", { class: "spinner" }), "Reading the rainfall record"])]);
+  const key = `${site.location.lat.toFixed(3)},${site.location.lon.toFixed(3)}`;
+  const fill = (body) => {
+    if (!body || !body.monthly_mm) {
+      box.replaceChildren(h("div", { class: "note info", text: body && !body.is_measured
+        ? "No monthly breakdown: the service used the documented regional climatology, which has no dates."
+        : "The rainfall record could not be read." }));
+      return;
+    }
+    const monsoon = (i) => i >= 5 && i <= 8;
+    const years = body.annual_totals || [];
+    box.replaceChildren(
+      h("div", { class: "chart-key", text: `Mean rainfall by month, ${num(body.years)} years (June to September highlighted)` }),
+      barChart(body.monthly_mm, MONTHS, { unit: "mm", highlight: monsoon }),
+      years.length ? h("div", { class: "chart-key", text: "Each year's total; the dashed line is the mean" }) : null,
+      years.length ? barChart(years.map((y) => y.mm), years.map((y) => "’" + String(y.year).slice(2)),
+                              { mean: body.annual_rainfall_mm, unit: "mm" }) : null,
+    );
+  };
+  if (rainCache.has(key)) fill(rainCache.get(key));
+  else {
+    fetch(`${API}/api/v1/rainfall?lat=${site.location.lat}&lon=${site.location.lon}`)
+      .then((r) => r.json()).then((body) => { rainCache.set(key, body); fill(body); })
+      .catch(() => fill(null));
+  }
+  return box;
+}
+
+function storageChart(storage) {
+  const triples = storage.stage_storage || [];
+  if (triples.length < 2) return null;
+  const depths = triples.map((t) => t[0]), areas = triples.map((t) => t[1]), volumes = triples.map((t) => t[2]);
+  const usable = storage.usable_depth_m ?? null;
+  return h("div", null, [
+    curveChart(depths, volumes, areas, {
+      xfmt: (v) => v.toFixed(1) + " m", yfmt: (v) => compact(v) + " m³", y2fmt: (v) => compact(v) + " m²",
+      markX: usable != null && usable < depths[depths.length - 1] ? usable : null,
+    }),
+    h("div", { class: "chart-key" }, [
+      h("span", null, [h("i"), "Volume held"]), h("span", null, [h("i", { class: "b" }), "Water surface"]),
+      usable != null && usable < depths[depths.length - 1] ? h("span", { text: "Red: where it spills" }) : null,
+    ]),
+  ]);
+}
+
+/* ---- the three numbers the brief asks for, first ---- */
+function kpis() {
+  const site = currentSite(), c = site.catchment, r = site.runoff, st = site.storage;
+  const kpi = (k, v, unit, sub) => h("div", { class: "kpi" }, [
+    h("div", { class: "k", text: k }),
+    h("div", { class: "v" }, [v, unit ? h("small", { text: " " + unit }) : null]),
+    h("div", { class: "s", text: sub }),
+  ]);
+  return h("div", { class: "kpis" }, [
+    kpi("Pond location", `${site.location.lat.toFixed(4)}, ${site.location.lon.toFixed(4)}`, "",
+        `Site ${site.rank} of ${sites().length}` + (site.is_recommended ? ", recommended" : "")),
+    kpi("Catchment", num(c.area_ha, 1), "ha", c.area_uncertainty_ha != null ? `± ${num(c.area_uncertainty_ha, 1)} ha, ${c.confidence}` : c.confidence),
+    kpi("Water a year", compact(r.annual_runoff_m3), "m³", `Pond holds ${compact(st.capacity_m3)} m³`),
+  ]);
+}
+
+/* ---- export ---- */
+function download(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = h("a", { href: url, download: name });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function exportName(ext) {
+  const site = lastBody.recommended_site.location;
+  return `pond-${site.lat.toFixed(4)}-${site.lon.toFixed(4)}.${ext}`;
+}
+
+function downloadGeoJSON() {
+  const all = [...lastBody.geojson.features, ...((lastBody.network && lastBody.network.features) || [])];
+  if (lastBody.area) all.unshift({ type: "Feature", geometry: lastBody.area.geometry, properties: { role: "selection" } });
+  for (const kind of ["water", "land"]) {
+    if (imageryLayers[kind].data) all.push(...imageryLayers[kind].data.geojson.features);
+  }
+  const collection = { type: "FeatureCollection", bbox: lastBody.geojson.bbox, features: all };
+  download(new Blob([JSON.stringify(collection)], { type: "application/geo+json" }), exportName("geojson"));
+}
+
+async function downloadPNG(button) {
+  const form = new FormData();
+  const p = lastBody.parameters;
+  if (lastBody.area) form.append("bbox", lastBody.area.selection_bbox.join(","));
+  else if (chosen) form.append("contour_map", chosen, chosen.name);
+  else { toast("Re-upload the sheet to render it as an image.", true); return; }
+  for (const key of ["top_n", "curve_number", "target_depth_m", "rainfall_mm", "rain_days", "grid_resolution", "lat", "lon"]) {
+    if (p[key] != null) form.append(key, p[key]);
+  }
+  form.append("ensemble", String(!!p.ensemble && (!!lastBody.area || ensembleBox.checked)));
+  form.append("basemap", view.layer === "street" ? "street" : view.layer === "hillshade" ? "hillshade" : "satellite");
+  form.append("width", "1600");
+  form.append("height", "1200");
+  button.disabled = true;
+  button.textContent = "Rendering";
+  try {
+    const response = await fetch(API + "/api/v1/renderMap", { method: "POST", body: form });
+    if (!response.ok) { const body = await response.json(); throw new Error(body.detail || response.status); }
+    download(await response.blob(), exportName("png"));
+  } catch (error) {
+    toast("Could not render the map: " + (error.message || error), true);
+  } finally {
+    button.disabled = false;
+    button.textContent = "PNG map";
+  }
+}
+
+function exportButtons() {
+  return [
+    h("button", { class: "btn", text: "GeoJSON", title: "Every layer as one GeoJSON file", onclick: downloadGeoJSON }),
+    h("button", { class: "btn", text: "PNG map", title: "The answer drawn over imagery, as an image",
+                  onclick: (event) => downloadPNG(event.currentTarget) }),
+    h("button", { class: "btn", text: "Print", onclick: () => window.print() }),
+  ];
+}
 
 function resultToolbar() {
   return h("div", { class: "toolbar" }, [
@@ -1743,7 +2143,7 @@ document.getElementById("saved-btn").onclick = () => showSaved();
 
 function sitesView() {
   const body = lastBody;
-  const parts = [resultToolbar(), h("div", { class: "sec" }, [
+  const parts = [resultToolbar(), kpis(), h("div", { class: "sec" }, [
     h("h3", { text: "Recommended site" }),
     siteCard(body.recommended_site, true),
   ])];
@@ -1773,6 +2173,7 @@ function waterView() {
         ["Runoff days", num(r.contributing_days)],
         ["Source", r.rainfall_source],
       ]),
+      rainfallCharts(site),
     ]),
     h("div", { class: "sec" }, [
       h("h3", { text: "Runoff" }),
@@ -1794,6 +2195,7 @@ function waterView() {
         ["Usable depth", num(s.usable_depth_m ?? s.max_depth_m, 2) + " m"],
         ["Fills per year", r.fill_ratio < 0 ? "n/a" : num(r.fill_ratio, 2)],
       ]),
+      storageChart(s),
       h("details", { class: "more" }, [
         h("summary", { text: "Stage and storage" }),
         rows(s.stage_storage.map(([depth, area, volume]) =>
@@ -1876,6 +2278,7 @@ function renderPanel() {
 
 function renderResults(body, refit) {
   lastBody = body;
+  if (mode === "sheet") refreshImagery();
   features = body.geojson.features || [];
   lastBBox = body.geojson.bbox || null;
   if (body.area && lastBBox) {
@@ -1922,7 +2325,7 @@ function bboxOf(feature) {
 
 function buildLegend() {
   const legend = document.getElementById("legend");
-  legend.hidden = !features.length && !contoursDrawn();
+  legend.hidden = !features.length && !contoursDrawn() && !imageryLayers.water.data && !imageryLayers.land.data;
   if (legend.hidden) return;
   legend.replaceChildren(h("h4", { text: "On the map" }));
 
@@ -1933,7 +2336,14 @@ function buildLegend() {
     legend.appendChild(h("div", { class: "lrow" }, [swatch, h("span", { text: label })]));
   };
 
-  if (features.length) {
+  if (lastBody && layerState.network && lastBody.network && lastBody.network.features.length) {
+    row("Stream, watercourse", "#1d6fb8", "sw line", null);
+    legend.lastChild.querySelector(".sw").style.borderTopColor = "#1d6fb8";
+  }
+  for (const [kind, label, colour] of [["water", "Existing water", "#38bdf8"], ["land", "Unavailable land", "#f87171"]]) {
+    if (layerState[kind] && imageryLayers[kind].data) row(label, colour, "sw", null);
+  }
+  if (features.length && layerState.answer) {
     row("Selected catchment", "#a6cee3", "sw", "solid #1f78b4");
     row("Other catchments", "#a6cee3", "sw faint", "dashed #4b6b80");
     row("Pond at capacity", "#3182bd", "sw", "solid #08519c");
@@ -2295,6 +2705,7 @@ function aoiChanged() {
     loadContours();
   }
   lookupRainfall(aoiBBox());
+  refreshImagery();
   render();
 }
 
@@ -2358,6 +2769,8 @@ function setMode(next) {
   grid.max = mode === "area" ? 150 : 20;
   grid.value = "";
   applyEnsembleCapability(healthInfo || {});
+  document.getElementById("avoid-wrap").hidden = mode !== "area";
+  for (const kind of ["water", "land"]) { imageryLayers[kind].data = null; imageryLayers[kind].key = null; }
   if (mode === "area" && aoi.ring) aoiChanged();
   if (mode === "sheet" && chosen) { contours.on = true; loadContours().then(() => contours.meta && lookupRainfall(contours.meta.bbox)); }
   showEmpty();
@@ -2536,7 +2949,6 @@ async function runArea() {
 }
 let lastJob = null;
 let running = false;
-const layerState = { avoidLand: false };
 function startRun() {
   running = true;
   runButton.disabled = true;
