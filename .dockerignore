@@ -1,0 +1,17 @@
+.git
+.venv
+.cache
+.data
+.pytest_cache
+**/__pycache__
+references
+tests
+docs
+tools
+deploy
+*.pdf
+*.npy
+server.log
+.env.role
+PLAN*.md
+REPORT.md

@@ -1,0 +1,55 @@
+# The whole stack with one `docker compose up` (HLD NFR: reproducibility).
+#
+#   frontend  nginx, the page, :5229 on the host        (HLD container 1)
+#   api       the gateway: jobs, cache, dispatch, saved  (HLD container 2)
+#   worker1-3 analyses, one at a time each               (the lab's sys2-4)
+#   cv        imagery: existing water, land availability (HLD container 3)
+#   pond-db   the saved-analyses database, a SQLite file on a named volume
+#             (HLD container 4: one file needs no server of its own)
+#
+# Every service is capped at 512 MB, the limit of the lab containers, so the stress
+# numbers measured here (docs/SCALING.md) describe the same envelope as the lab.
+
+x-pond: &pond
+  build: .
+  image: pond-catchment:latest
+  restart: unless-stopped
+  mem_limit: 512m
+  environment: &pond-env
+    POND_CV_SERVICE_URL: http://cv:5000
+    POND_JOBS_WORKERS: ""
+
+services:
+  frontend:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    mem_limit: 64m
+    ports: ["5229:80"]
+    volumes:
+      - ./static:/usr/share/nginx/html:ro
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on: [api]
+
+  api:
+    <<: *pond
+    environment:
+      <<: *pond-env
+      POND_JOBS_WORKERS: http://worker1:5000,http://worker2:5000,http://worker3:5000
+      POND_JOBS_STRATEGY: ${POND_JOBS_STRATEGY:-least_busy}
+    # No host port: everything reaches it through the frontend on 5229.
+    volumes: ["pond-db:/data"]
+    depends_on: [worker1, worker2, worker3, cv]
+
+  worker1: { <<: *pond, volumes: ["tiles1:/srv/pond/.cache"] }
+  worker2: { <<: *pond, volumes: ["tiles2:/srv/pond/.cache"] }
+  worker3: { <<: *pond, volumes: ["tiles3:/srv/pond/.cache"] }
+
+  cv:
+    <<: *pond
+    command: ["uvicorn", "app.cv.service:app", "--host", "0.0.0.0", "--port", "5000", "--workers", "1"]
+
+volumes:
+  pond-db:
+  tiles1:
+  tiles2:
+  tiles3:
