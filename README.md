@@ -1,164 +1,125 @@
-# Pond Catchment Analysis API
+# Pond Catchment Analysis
 
-Send a contour map as KML or KMZ. Get back a village pond site, the ground that drains
-into it, and how much water that ground delivers in an average year.
-
-**Live at http://10.1.75.53:5229** — [demo page](http://10.1.75.53:5229/),
-[API documentation](http://10.1.75.53:5229/docs).
+Draw an area on a map. Get back where a village pond should go, the ground that drains
+into it, and how much water that ground delivers in an average year, drawn on the map.
+Or upload a surveyed contour sheet for the same answer at survey accuracy.
 
 ```bash
-curl -F contour_map=@data/contours_1m.kml http://10.1.75.53:5229/api/v1/analyzeContour
+docker compose up -d --build        # then open http://localhost:5229 and press "Try the sample area"
 ```
-
-Phase 2 of the Village Pond Planning System, which the provided Phase 1 high-level
-design describes. The report is
-[Pond_Catchment_Analysis_Report.pdf](Pond_Catchment_Analysis_Report.pdf), the API
-reference is [docs/API.md](docs/API.md), and the evidence behind the numbers is in
-[docs/METHODOLOGY.md](docs/METHODOLOGY.md).
-
-## How it works
-
-1. **Contours to points.** Every vertex of every contour line is a known `(x, y, z)`.
-2. **Points to a grid.** Delaunay triangulation, then linear interpolation onto a square
-   grid whose cell size comes from the mean contour spacing.
-3. **Smooth.** Raw interpolation leaves flat stair steps instead of a hillside. A
-   NaN-aware Gaussian takes them out. Worth up to 12.8% of the catchment area against a
-   valley whose answer can be worked out on paper.
-4. **Fill the pits,** so water is never trapped in a hole the data invented.
-5. **Route the water.** Each cell drains to its steepest neighbour. Add up what passes
-   through.
-6. **Trace the catchment** by walking the flow arrows backwards from the outlet.
-
-## Where the pond goes
-
-Siting starts from the drainage network. Find the streams, keep buildable low-slope
-ground, rank by how much drains into each spot, and remove each pick's whole catchment so
-the alternatives are separate basins.
-
-One rule is worth reading twice. Ranking by catchment area alone asks for the cell that
-the most water passes through, and on a sheet with a river across it the answer is the
-river. So any channel already draining more than 150 ha counts as a watercourse, and a
-site has to stand 3 m above the one it drains into.
-
-Checked against the OpenStreetMap water layer over the sample sheet, that takes candidate
-ground standing in the river from 310 cells of 2,413 down to none. The old top site sat in
-the middle of the Shivnath. See [docs/METHODOLOGY.md §3](docs/METHODOLOGY.md).
-
-## Rainfall
-
-Leave `rainfall_mm` out of the request and the service reads ten years of daily rainfall
-for the chosen site from [Open-Meteo](https://open-meteo.com/), which is free and needs no
-key. Send a figure of your own and it is used instead. If the weather service cannot be
-reached, a documented regional climatology answers and the response says so, so an
-analysis is never blocked by the weather.
-
-`GET /api/v1/rainfall?lat=&lon=` exposes the same feed on its own. The demo page calls it
-for the middle of the sheet as soon as a file is read, so the figure is on screen before
-anything is analysed.
-
-## Quickstart
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+curl -X POST http://localhost:5229/api/v1/analyzeArea -H 'Content-Type: application/json' \
+     -d '{"bbox": [81.2814, 21.2398, 81.3126, 21.2636]}'
 ```
 
-Open `http://localhost:8000` for the demo page. Drop the sample map on it and its
-contour lines are drawn over satellite imagery straight away, which is how you check that
-a catchment boundary follows the ridges rather than taking it on trust. The page asks for
-three things: the file, the land cover, the pond depth. Rainfall, grid size and the pour
-point are worked out from the sheet unless **Advanced** overrides them. Press **Analyse**
-and the answer arrives on the map and under three tabs: the sites, the water they yield,
-and the numbers the run was built from. Click any candidate, on the map or in the list,
-to see the ground it covers. Interactive API documentation is at
-`http://localhost:8000/docs`.
+The Village Pond Planning System: Phase 1 was the high-level design, Phase 2 the contour
+analysis ([report](Pond_Catchment_Analysis_Report.pdf)), and Phase 3, this, the complete
+map-first product. The Phase 3 report is [docs/REPORT_PHASE3.md](docs/REPORT_PHASE3.md);
+the API reference [docs/API.md](docs/API.md); installation [docs/INSTALL.md](docs/INSTALL.md);
+the method and its evidence [docs/METHODOLOGY.md](docs/METHODOLOGY.md),
+[docs/VALIDATION.md](docs/VALIDATION.md) and [docs/SCALING.md](docs/SCALING.md).
 
-```bash
-curl -F contour_map=@data/contours_1m.kml http://localhost:8000/api/v1/analyzeContour
+## What it does
+
+1. **Choose the land.** Search for a village, then drag a box or click a polygon around
+   it. The area is measured as you draw and checked against the service's limits before
+   anything is sent.
+2. **Heights, from free data.** SRTM elevation tiles (AWS terrain tiles, keyless) for the
+   selection plus a 25% margin, so streams that cross the drawn line are counted in full.
+   The demo region is committed with the repository and needs no network.
+3. **The analysis,** unchanged from Phase 2: smooth, fill pits, route water downhill,
+   rank sites by how much drains to them, keep them 3 m clear of any watercourse, trace
+   each catchment, cross-check it on three more grids for an error bar.
+4. **Water.** Ten years of daily rainfall for the site from Open-Meteo, SCS-CN runoff per
+   rain day, and a stage-storage curve for the pond.
+5. **On the map.** The pond, its catchment, the flow network, the alternatives, contour
+   lines generated from the DEM, and from satellite imagery the existing ponds and the
+   land that is built on or under water. Rainfall and storage charts, export as GeoJSON
+   or PNG, print, and save the analysis to reopen later.
+
+A progress bar reports the stage the analysis is actually in, because jobs run
+asynchronously and report where they are. The sample area takes about half a second.
+
+## How far to trust the free-data answer
+
+The provided 1 m contour survey and the free SRTM tiles were run over the same ground
+([VALIDATION.md](docs/VALIDATION.md)): the DEMs agree to 0.26 m RMSE, the recommended site
+is in the same valley 400 m apart, and one of the map path's catchments traces the
+survey's recommended one with IoU 0.53. The map path's catchment is 31% larger (87 ha
+against 66 ha) because its grid is 17.8 m, not 3.1 m. Use the map path to find the site;
+use a survey to design the pond.
+
+## Under load
+
+Measured on the docker-compose stack with every container capped at 512 MB, the lab's
+limit ([SCALING.md](docs/SCALING.md)):
+
+| workers | throughput | p95 |
+|---|---|---|
+| 1 | 1.34 req/s | 7.65 s |
+| 2 | 2.10 req/s | 4.50 s |
+| 3 | 3.54 req/s | 2.99 s |
+
+Peak worker memory 276 MiB of 512. A repeated area is answered from the cache in 10 ms.
+Overload is a `503 busy` the client can retry, and a selection too big for the memory is
+a `422 aoi_too_large` before any work starts, never an out-of-memory kill.
+
+## Architecture
+
+```
+browser ── frontend (nginx) ── gateway ─┬─ worker ─┐
+                                        ├─ worker ─┼── cv (imagery)
+                                        └─ worker ─┘
+          saved sites: SQLite on the gateway's volume
 ```
 
-`POST /api/v1/analyzeContour`, also reachable as `findCatchment`, takes the contour file
-in the **`contour_map`** field — `file` is accepted as well, for clients written before
-the field had a fixed name — plus optional `grid_resolution`, `top_n`, `lat`, `lon`,
-`curve_number`, `rainfall_mm`, `rain_days`, `target_depth_m` and `ensemble`. It returns
-the recommended site, its
-catchment with an error bar, the stage-storage curve, the yearly runoff, and a GeoJSON
-`FeatureCollection` that loads straight into geojson.io. Errors always come back as
-`{"status": "error", "code", "detail", "hint"}`.
-
-`POST /api/v1/renderMap` takes the same file and the same parameters and returns a PNG
-instead of JSON: the catchment, the pond and the ranked sites drawn over satellite imagery
-and the contour lines underneath them, with a legend, a scale bar and the recommended
-site's area on it. It is the same analysis and the same colours as the GeoJSON, drawn
-server-side for a reader who has no map client in front of them. Optional `width`,
-`height`, `basemap` (`satellite`, `street`, `hillshade`, `none`), `contours`, `frame`
-(`sheet` or `sites`) and `legend`. Because a picture cannot carry a caveat, every warning
-the JSON would have returned comes back in the `X-Pond-Warnings` header — read it. If the
-tile server cannot be reached the image falls back to a hillshade of the uploaded sheet
-and says so there, rather than turning somebody else's outage into a 502.
-
-`POST /api/v1/contours` takes the same file and hands the contour lines straight back as
-a styled `FeatureCollection`, without analysing anything. It runs the same parser, so the
-lines it draws are the lines the analysis read, and it answers in well under a second
-because it stops there. This is what the demo page's contour layer is, and it is worth
-having on its own: it is the only way to see the ground a catchment boundary is claiming
-about.
-
-## Layout
+One codebase, one image. What a process is depends on its environment: with
+`POND_JOBS_WORKERS` set it is a gateway (job store, result cache, least-busy dispatch,
+saved sites) and hands analyses to workers over their own job API; without it, it analyses
+itself. On the lab containers the gateway is sys1 and the workers sys2-4.
 
 | Path | What lives there |
 |---|---|
-| `app/core/` | The analysis: parsing, projection, grid, flow routing, catchment, siting, hydrology, and the map renderer |
-| `app/pipeline.py` | Wires the stages together. The only orchestration point |
-| `app/providers/` | Swappable data sources. Rainfall lives here |
-| `app/routers/` | HTTP surface only: validation and error mapping |
-| `app/config.py` | Every tunable, documented and overridable from the environment |
-| `tests/` | Analytic validation, mass balance, structural variants |
-| `static/` | `index.html`, the demo page. One file, no build step, no CDN |
-| `data/` | `contours_1m.kml`, the provided sample sheet |
-| `docs/` | Report evidence: methodology, API reference, figures |
+| `app/core/` | The analysis. Phase 2's modules unchanged; Phase 3 added `raster_dem.py` (area to DEM), `contouring.py` (contours from a DEM) and `network.py` (the stream layer) |
+| `app/providers/` | Elevation tiles and rainfall, each behind one interface with a cache |
+| `app/pipeline.py` | `analyse` (a sheet) and `analyse_area` (an area): different front doors, one analysis |
+| `app/jobs.py` | Async jobs, the result cache, the dispatcher |
+| `app/cv/` | Satellite imagery: existing water and land availability, in-process or as its own service |
+| `app/store.py` | Saved analyses |
+| `app/routers/` | HTTP only: validation and error mapping |
+| `static/index.html` | The page. One file, no build step, no CDN |
+| `deploy/` | The four lab containers, and nginx for compose |
+| `tools/` | Tile pre-warming, the load generator and the scaling matrix |
+| `data/` | The sample contour sheet and the committed demo-region tiles |
 
-## Deployment
+## Endpoints
 
-The service runs on the lab container `stu68_sys1`, forwarded to
-**http://10.1.75.53:5229**:
+| | |
+|---|---|
+| `POST /api/v1/analyzeArea` | An area in (bbox, polygon or GeoJSON), the answer out |
+| `POST /api/v1/jobs`, `GET /api/v1/jobs/{id}` | The same, asynchronously, with per-stage progress |
+| `POST /api/v1/analyzeContour` | A contour sheet (KML/KMZ) in, the same answer out |
+| `POST /api/v1/renderMap` | Either, drawn as a PNG |
+| `POST /api/v1/contours` | Contour lines from a sheet, or generated for an area |
+| `POST /api/v1/imagery/detectPonds` | Existing water bodies |
+| `POST /api/v1/land/available` | Water, buildings and trees, and the share left free |
+| `/api/v1/ponds` | Save, list, reopen, delete analyses; `ponds.geojson` for GIS |
+| `GET /api/v1/places?q=` | Village search |
+| `GET /api/v1/rainfall` | Ten years of rainfall for a point, by month and year |
+| `GET /api/v1/cluster`, `GET /health` | Workers, queue, cache; liveness and limits |
 
-```
-laptop ──► 10.1.75.53:5229 ──► container 172.17.0.30:5000 ──► uvicorn (0.0.0.0:5000)
-```
+Errors always come back as `{"status": "error", "code", "detail", "hint"}`. Full
+reference: [docs/API.md](docs/API.md), or `/docs` on a running service.
 
-`run.sh` on the container sets the environment, binds `0.0.0.0:5000` and restarts uvicorn
-if it dies. To bring it back up after a container restart:
+## Running it
 
-```bash
-ssh -p 2229 student@10.1.75.53
-setsid ~/PondCatchmentAnalysis/run.sh >/dev/null 2>&1 </dev/null &
-```
+See [docs/INSTALL.md](docs/INSTALL.md). In short: `uvicorn app.main:app` for one process,
+`docker compose up` for the whole system, `deploy/deploy.sh` for the lab's four containers.
 
-The container is capped at 512 MB. One grid peaks near 300 MB and fits; the four-grid
-ensemble peaks at 581 MB and does not, so it is off there (`POND_API_DEFAULT_ENSEMBLE=false`,
-and `POND_API_ALLOW_ENSEMBLE=false` so an explicit `ensemble=true` gets a 422 instead of
-killing the worker). Responses from the container carry no error bar.
-
-Analyses run one at a time everywhere, not just there: two at once need over a gigabyte,
-and on a small host they do not queue, they OOM. Concurrent requests wait their turn.
-Details in section 7 of [the report](Pond_Catchment_Analysis_Report.pdf).
-
-## Configuration
-
-Every setting is overridable from the environment with a `POND_` prefix. The ones worth
-knowing about:
-
-```bash
-POND_SITING_TRUNK_DRAINAGE_AREA_HA=150     # a channel over this is a watercourse
-POND_SITING_MIN_HEIGHT_ABOVE_TRUNK_M=3     # freeboard a site must keep above it
-POND_RAINFALL_ENABLED=false                # skip the live rainfall fetch entirely
-POND_RAINFALL_YEARS=10                     # years of daily records to average
-POND_API_DEFAULT_ENSEMBLE=false            # one grid instead of four, roughly 3x faster
-POND_API_ALLOW_ENSEMBLE=false              # refuse ensemble=true rather than run out of memory
-POND_API_MAX_CONCURRENT_ANALYSES=1         # analyses that run at once; the rest queue
-```
+The Phase 2 service is deployed at **http://10.1.75.53:5229** on `stu68_sys1`.
+`deploy/deploy.sh` replaces it with the Phase 3 gateway at the same address and starts
+workers on sys2-4.
 
 ## Tests
 
@@ -166,15 +127,17 @@ POND_API_MAX_CONCURRENT_ANALYSES=1         # analyses that run at once; the rest
 pytest
 ```
 
-451 tests, about 135 seconds, all passing. No test needs the network:
-`tests/conftest.py` switches the live rainfall fetch off, and the Open-Meteo provider is
-exercised against a payload built in the test.
+588 tests, about three minutes, no network: the live rainfall fetch is off, elevation
+tiles come from the committed seed or from a formula, and imagery is synthesised with a
+known answer. Among them: the analytic valley and the mass balance re-run through the
+raster path, the two-path agreement with the survey, and the gateway dispatching to real
+worker processes, routing around a dead one.
 
 ## Status
 
-Complete. All twelve phases done, one commit per phase.
-
-- [x] Phases 0 to 10, scaffold through the demo page
-- [x] Phase 11, deployed on `stu68_sys1` at http://10.1.75.53:5229
-- [x] Phase 12, [the report](Pond_Catchment_Analysis_Report.pdf),
-      [docs/API.md](docs/API.md), [docs/METHODOLOGY.md](docs/METHODOLOGY.md)
+- [x] Phase 2 (0-12): contour analysis, API, demo page, deployment, report
+- [x] 13 Elevation provider · 14 Raster DEM · 15 `analyzeArea` · 16 Contours from the DEM
+- [x] 17 Two-path validation · 18 Area selection UI · 19 Async jobs · 20 Four-system deploy scripts
+- [x] 21 Stress and scaling (measured on compose) · 22 Front-end completion · 23 Imagery (CV)
+- [x] 24 Saved analyses · 25 docker-compose · 26 Docs
+- [ ] The Phase 3 system deployed to the lab containers, and the scaling matrix re-run there

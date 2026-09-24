@@ -513,7 +513,8 @@
   .kpi .k { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 700; }
   .kpi .v { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 3px; line-height: 1.2; }
   .kpi .v small { font-size: 11.5px; font-weight: 500; color: var(--muted); }
-  .kpi .s { font-size: 11px; color: var(--muted); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kpi .s { font-size: 11px; color: var(--muted); margin-top: 3px; line-height: 1.35; }
+  .kpi .v.loc { font-size: 13.5px; }
 
   /* charts */
   .chart { width: 100%; height: auto; display: block; margin-top: 4px; overflow: visible; }
@@ -1983,15 +1984,15 @@ function storageChart(storage) {
 /* ---- the three numbers the brief asks for, first ---- */
 function kpis() {
   const site = currentSite(), c = site.catchment, r = site.runoff, st = site.storage;
-  const kpi = (k, v, unit, sub) => h("div", { class: "kpi" }, [
+  const kpi = (k, v, unit, sub, cls) => h("div", { class: "kpi" }, [
     h("div", { class: "k", text: k }),
-    h("div", { class: "v" }, [v, unit ? h("small", { text: " " + unit }) : null]),
+    h("div", { class: "v" + (cls ? " " + cls : "") }, [v, unit ? h("small", { text: " " + unit }) : null]),
     h("div", { class: "s", text: sub }),
   ]);
   return h("div", { class: "kpis" }, [
-    kpi("Pond location", `${site.location.lat.toFixed(4)}, ${site.location.lon.toFixed(4)}`, "",
-        `Site ${site.rank} of ${sites().length}` + (site.is_recommended ? ", recommended" : "")),
-    kpi("Catchment", num(c.area_ha, 1), "ha", c.area_uncertainty_ha != null ? `± ${num(c.area_uncertainty_ha, 1)} ha, ${c.confidence}` : c.confidence),
+    kpi("Pond location", `${site.location.lat.toFixed(4)} N ${site.location.lon.toFixed(4)} E`, "",
+        `Site ${site.rank} of ${sites().length}` + (site.is_recommended ? ", recommended" : ""), "loc"),
+    kpi("Catchment", num(c.area_ha, 1), "ha", c.area_uncertainty_ha != null ? `± ${num(c.area_uncertainty_ha, 1)} ha · ${c.confidence}` : c.confidence),
     kpi("Water a year", compact(r.annual_runoff_m3), "m³", `Pond holds ${compact(st.capacity_m3)} m³`),
   ]);
 }

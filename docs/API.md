@@ -4,17 +4,183 @@ Base URL of the running service: **`http://10.1.75.53:5229`**
 Interactive documentation, generated from the same models that serialise the responses:
 **`http://10.1.75.53:5229/docs`**
 
-Five endpoints, plus an alias. Everything is `multipart/form-data` in, and JSON out
-except `/renderMap`, which returns a PNG.
+Two ways in, one answer out. Draw an area on a map and the heights come from free SRTM
+elevation tiles (Phase 3); upload a surveyed contour sheet and they come from the sheet
+(Phase 2). Both return **the same response schema**, so a client renders either the same
+way. The map path takes JSON; the sheet path takes `multipart/form-data`. Everything
+answers JSON except `/renderMap`, which returns a PNG.
 
 | Method | Path | What it does |
 |---|---|---|
+| `POST` | `/api/v1/analyzeArea` | **An area drawn on the map in**, pond site + catchment + yield out |
+| `POST` | `/api/v1/jobs` | The same, asynchronously: `202` and a job id at once |
+| `GET` | `/api/v1/jobs/{id}` | Where a job is (stage, progress) and its result when done |
 | `POST` | `/api/v1/analyzeContour` | Contour map in, pond site + catchment + yield out |
 | `POST` | `/api/v1/findCatchment` | Alias of the above, identical signature |
-| `POST` | `/api/v1/renderMap` | The same analysis, drawn as a PNG map |
-| `POST` | `/api/v1/contours` | The same map back as drawable lines, without analysing it |
-| `GET` | `/api/v1/rainfall` | Ten years of daily rainfall for one point |
-| `GET` | `/health` | Liveness. Does no work on purpose |
+| `POST` | `/api/v1/renderMap` | Either analysis, drawn as a PNG map (file, or `bbox`) |
+| `POST` | `/api/v1/contours` | Contour lines: from a file, or generated from the DEM for a `bbox` |
+| `POST` | `/api/v1/imagery/detectPonds` | Existing ponds and water, from satellite imagery |
+| `POST` | `/api/v1/land/available` | Water, buildings and trees in an area, and the share left free |
+| `GET` `POST` | `/api/v1/ponds` | Saved analyses: list, save |
+| `GET` `DELETE` | `/api/v1/ponds/{id}` | One saved analysis in full, or delete it |
+| `GET` | `/api/v1/ponds.geojson` | Every saved site as a GeoJSON point |
+| `GET` | `/api/v1/places?q=` | Find a village by name (Nominatim, proxied and cached) |
+| `GET` | `/api/v1/rainfall` | Ten years of daily rainfall for one point, with its months and years |
+| `GET` | `/api/v1/cluster` | The gateway's workers, their load, the queue and the cache |
+| `GET` | `/health` | Liveness, role and limits. Does no work on purpose |
+
+---
+
+## POST /api/v1/analyzeArea
+
+Send a rectangle or polygon drawn on a map. Get back where the pond goes, what drains
+into it, and how much water that ground delivers in an average year: the same answer
+`/analyzeContour` gives for a sheet, with no survey needed.
+
+### Request
+
+`application/json`. Exactly one of `bbox`, `polygon` or `geometry`; everything else is
+the same set of knobs as `/analyzeContour`, as JSON fields.
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `bbox` | `[min_lon, min_lat, max_lon, max_lat]` | — | A rectangle |
+| `polygon` | `[[lon, lat], ...]` | — | A polygon; closing it is optional. Up to 2,000 corners |
+| `geometry` | GeoJSON | — | A `Polygon`, or a `Feature` holding one |
+| `ensemble` | bool | **true** | Cross-check on three more grids. On by default here: the grids are small |
+| `avoid_unavailable_land` | bool | false | Keep the pond off water, buildings and trees read from the imagery |
+| `grid_resolution` | float | tiles | Metres, 5–150. Left out: the z13 tile pixel, 17.8 m at 21 N |
+| `top_n`, `lat`, `lon`, `curve_number`, `rainfall_mm`, `rain_days`, `target_depth_m` | | | As for `/analyzeContour` |
+
+**The selection is analysed with a margin.** The DEM covers the selection grown by 25% of
+its span on every side (never less than 300 m), flow is routed across all of it, and the
+pond is kept inside what was drawn. A catchment that crosses the drawn line is counted in
+full; without the margin every such catchment, and every volume from it, would be
+silently understated.
+
+**Limits.** A selection over 100 km² is a `422 aoi_too_large` before any work starts; under
+2 ha is `aoi_too_small`. Up to the limit the grid coarsens so it never passes a million
+cells, the envelope a 512 MB worker is known to hold.
+
+### Response, 200
+
+Exactly the `/analyzeContour` shape above, with three differences a client may care about:
+
+```jsonc
+{
+  "input": { "source": "elevation_tiles", "filename": "selected area", "bbox": [...], ... },
+  "area": {
+    "kind": "bbox",
+    "selection_bbox": [81.2814, 21.2398, 81.3126, 21.2636],
+    "selection_area_ha": 851.6,
+    "analysed_bbox": [81.2736, 21.23385, 81.3204, 21.26955],
+    "analysed_area_ha": 1916.1,              // the selection plus its margin
+    "elevation_source": "AWS terrain tiles (terrarium), SRTM ~30 m over India",
+    "tile_zoom": 13, "tiles": 4,
+    "tile_sources": { "seed": 4 },           // memory | seed | disk | network | missing
+    "geometry": { "type": "Polygon", ... }
+  },
+  "network": { "type": "FeatureCollection", "features": [ /* streams, one per reach */ ] }
+}
+```
+
+`network` (present on both paths) is the drainage network: one `LineString` per reach
+between confluences, with `upstream_area_ha` and `watercourse` (true above the 150 ha
+trunk threshold). These are the channels a pond could sit on and the ones it had to stand
+clear of.
+
+```bash
+curl -X POST http://10.1.75.53:5229/api/v1/analyzeArea \
+     -H 'Content-Type: application/json' \
+     -d '{"bbox": [81.2814, 21.2398, 81.3126, 21.2636]}'
+```
+
+How far this agrees with the surveyed sheet over the same ground is measured, not
+assumed: [VALIDATION.md](VALIDATION.md).
+
+---
+
+## POST /api/v1/jobs, GET /api/v1/jobs/{id}
+
+The same analysis without holding a connection open. `POST` takes exactly the
+`/analyzeArea` body and answers `202` at once:
+
+```json
+{"job_id": "0a2759a5bdf74683", "status": "queued", "stage": "queued", "progress": 0.0, "cached": false, ...}
+```
+
+Poll `GET /api/v1/jobs/{job_id}` (the `Location` header names it):
+
+| Field | Meaning |
+|---|---|
+| `status` | `queued`, `running`, `done` or `failed` |
+| `stage` | The stage running now: `elevation`, `land`, `flow`, `ensemble`, `siting`, `hydrology`, `geojson` |
+| `stage_label` | The same, for a person |
+| `progress` | 0 to 1, from the stages actually finished, not a timer |
+| `worker` | Which worker ran it, `local`, or `cache` |
+| `result` | The full `/analyzeArea` response, once `done`. `?include_result=false` leaves it out while polling |
+| `error` | `{status, code, detail, hint}`, once `failed` |
+
+A selection analysed before with the same parameters comes back `done` immediately, with
+`cached: true`. When every worker is busy and 32 jobs already wait, a new one is refused
+with `503 busy` rather than accepted to time out. Jobs are kept an hour after they finish.
+
+---
+
+## GET /api/v1/places
+
+`?q=Raipur` → up to eight matches from OpenStreetMap's Nominatim, each with `lat`, `lon`
+and a `bbox` to fly the map to. Proxied so one cache serves everyone and Nominatim's
+one-request-a-second policy is kept in one place. Unreachable, it is a
+`503 places_unavailable` whose hint is to pan the map instead; nothing else depends on it.
+
+---
+
+## POST /api/v1/imagery/detectPonds, POST /api/v1/land/available
+
+Satellite imagery read for what the terrain cannot say. Body: `{"bbox": [...]}`,
+`{"polygon": [...]}` or `{"geometry": {...}}`.
+
+`detectPonds` returns every existing water body in the area, largest first, one polygon
+each with `area_m2`, `area_ha` and `centroid`: the village ponds, tanks and rivers already
+there. `land/available` returns the area split into `water`, `built` and `trees` (one
+`MultiPolygon` each, with `area_ha` and `share`) and `available_share` for the rest.
+
+```json
+{"status": "ok", "available_ha": 717.1, "available_share": 0.8413,
+ "classes": {"water": {"area_ha": 96.7, "share": 0.1134}, "built": {"area_ha": 38.6, "share": 0.0453}, "trees": {...}},
+ "imagery_zoom": 16, "resolution_m": 2.23, "geojson": {...}, "warnings": ["Classified from ..."]}
+```
+
+These are colour-and-texture rules on Esri World Imagery at about 2 m, not a trained
+model and not a survey: a screening layer that says where to look before digging. The
+rules and their measured limits are in [METHODOLOGY.md §9](METHODOLOGY.md). If the
+imagery server cannot be reached: `503 imagery_unavailable`.
+
+---
+
+## Saved sites: /api/v1/ponds
+
+| Call | Does |
+|---|---|
+| `POST /api/v1/ponds` `{"name", "notes"?, "job_id"}` | Save a finished job's result |
+| `POST /api/v1/ponds` `{"name", "notes"?, "response"}` | Save any analysis response, e.g. from `/analyzeContour` |
+| `GET /api/v1/ponds?limit=&offset=` | Newest first, with a summary each: location, catchment, runoff, capacity |
+| `GET /api/v1/ponds/{id}` | One, with the full response, so reopening draws exactly what was analysed |
+| `DELETE /api/v1/ponds/{id}` | `204` |
+| `GET /api/v1/ponds.geojson` | Every saved site as a point, for any GIS |
+
+Stored in SQLite (`POND_STORE_PATH`), on the gateway.
+
+---
+
+## GET /api/v1/cluster
+
+What the gateway knows: its `role` (`gateway` or `worker`), the dispatch `strategy`
+(`least_busy` or `round_robin`), each worker's health, in-flight count and totals, the
+queue length, and the result cache's hits and misses.
+
+---
 
 ---
 
@@ -136,6 +302,10 @@ print(s["location"], s["catchment"]["area_ha"], "ha", s["runoff"]["annual_runoff
 
 ## POST /api/v1/renderMap
 
+> **For a drawn area,** send `bbox=min_lon,min_lat,max_lon,max_lat` instead of the file
+> (the same analysis as `/analyzeArea`), with any of the parameters below. The selection
+> is outlined in white and the contours are generated from the DEM.
+
 The answer as a picture: the catchment, the pond and the ranked sites drawn over
 satellite imagery and the contour lines they were derived from. Same input as
 `/analyzeContour`, same analysis, same colours. What comes back is `image/png`.
@@ -221,6 +391,11 @@ curl -sD - -o catchment.png -X POST -F "contour_map=@data/contours_1m.kml" \
 ---
 
 ## POST /api/v1/contours
+
+> **For an area with no sheet (FR-2),** send `bbox=min_lon,min_lat,max_lon,max_lat`
+> instead of the file, and optionally `interval_m`. The lines are generated from the
+> elevation tiles by marching squares, at a round interval giving about 25 lines unless
+> asked otherwise, and come back in exactly the shape below, `elevation_source: "dem"`.
 
 The contour lines in an uploaded sheet, styled and thinned for a map. No analysis: this
 is the parser and nothing else, so it answers in about half a second on the sample sheet
@@ -345,9 +520,14 @@ curl "http://10.1.75.53:5229/api/v1/rainfall?lat=21.25&lon=81.63"
   "source": "Open-Meteo ERA5 daily records, 10 years",
   "is_measured": true,
   "description": "1476 mm a year over 123 rain days, averaged across 10 years ...",
+  "monthly_mm": [4.6, 10.1, 12.8, 9.0, 21.3, 180.7, 379.5, 397.3, 272.1, 69.3, 3.7, 7.1],
+  "annual_totals": [{"year": 2016, "mm": 1431.2}, ...],
   "warnings": ["..."]
 }
 ```
+
+`monthly_mm` and `annual_totals` are what the page's rainfall chart draws; both are `null`
+when the climatology answered, since its days have no dates.
 
 This endpoint does not fail on a weather service that is down. It answers with the
 documented regional climatology instead, `is_measured` false, and the reason in
@@ -359,8 +539,9 @@ documented regional climatology instead, `is_measured` false, and the reason in
 
 ```bash
 curl http://10.1.75.53:5229/health
-# {"status":"ok","service":"Pond Catchment Analysis API","version":"1.0.0",
-#  "ensemble_available":false,"ensemble_default":false}
+# {"status":"ok","service":"Pond Catchment Analysis API","version":"2.0.0",
+#  "ensemble_available":false,"ensemble_default":false,
+#  "role":"gateway","workers":3,"max_aoi_area_km2":100.0,"min_aoi_area_ha":2.0}
 ```
 
 Deliberately does no work, so it answers before the first analysis rather than after one.
@@ -369,7 +550,12 @@ Deliberately does no work, so it answers before the first analysis rather than a
 `ensemble_default` whether an ordinary request runs it. Both are false on this deployment
 (see the note under [POST /api/v1/analyzeContour](#post-apiv1analyzecontour)). A client
 that reads them before its first upload never earns a `422 ensemble_unavailable`; the demo
-page reads them here to set its own switch.
+page reads them here to set its own switch. They describe the sheet path; the map path's
+grids are small enough that its ensemble runs on this host anyway.
+
+`role` is `gateway` when this process dispatches to `workers` others, `worker` when it
+analyses itself. `max_aoi_area_km2` and `min_aoi_area_ha` are the map path's limits, so a
+page can warn before sending a selection that would be refused.
 
 ---
 
@@ -426,9 +612,21 @@ file has to change.
 | `invalid_basemap` | `/renderMap` asked for a basemap that is not one of the four |
 | `invalid_frame` | `/renderMap` asked for a frame that is not `sheet` or `sites` |
 | `render_too_large` | The view needs more than 256 map tiles. Ask for a smaller image |
+| `invalid_aoi` | The selection is malformed: not four numbers, inverted, under three corners, off the globe |
+| `aoi_too_large` | The selection is over 100 km² |
+| `aoi_too_small` | The selection is under 2 ha |
+| `no_site_in_selection` | The terrain has pond sites nearby but none inside the selection (or none on available land) |
+| `invalid_interval` | `/contours` asked for an interval giving more than 400 lines |
 
 The last few are not malformed requests, but to a client they are the same thing: nothing
 about the file changes, and only a different ask can help.
+
+**503 — an upstream source is down, or the cluster is full.** `elevation_unavailable`
+(the tiles for the area could not be read; the demo region is committed and never needs
+the network), `imagery_unavailable`, `places_unavailable`, and `busy` (every worker busy
+and the queue full: retry shortly). None of these is the request's fault.
+
+**404** — `job_not_found`, `pond_not_found`.
 
 **504 — `analysis_timeout`.** The analysis passed the 120-second limit. The hint asks for
 a coarser `grid_resolution` or `ensemble=false`.
@@ -440,7 +638,10 @@ default: the request could not be analysed.
 
 ## Notes for a client
 
-- **Timing.** A full analysis of the 831 ha sample takes about **15 s** on the container
+- **Timing, map path.** The same ground drawn as an area takes about **0.5 s** with the
+  ensemble on, because the grid is 60,606 cells against 638,472. Under load, three
+  workers answer 3.5 requests a second with p95 3 s: [SCALING.md](SCALING.md).
+- **Timing, sheet path.** A full analysis of the 831 ha sample takes about **15 s** on the container
   with the ensemble off, about 10 s locally with it on. `/contours` on the same file takes
   well under a second; `/health` and `/rainfall` are immediate. Set a client timeout above
   120 s, which is the server's own limit.
@@ -455,7 +656,7 @@ default: the request could not be analysed.
 - **Responses are gzipped** above 2 kB when the client sends `Accept-Encoding: gzip`. It
   matters for one of them: the sample sheet's contour overlay is 0.9 MB of coordinates and
   160 kB compressed.
-- **CORS** is open for `GET`, `POST` and `OPTIONS`, so a browser page on another origin
+- **CORS** is open for `GET`, `POST`, `DELETE` and `OPTIONS`, so a browser page on another origin
   can call this directly.
 - **Warnings are not errors.** A 200 response with a `warnings` array is a complete
   answer with caveats attached — a skipped contour line, a reanalysis rainfall grid, the

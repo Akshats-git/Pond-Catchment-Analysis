@@ -722,7 +722,7 @@ class APIConfig:
     """Service surface (PLAN Phase 9)."""
 
     title: str = "Pond Catchment Analysis API"
-    version: str = "1.0.0"
+    version: str = "2.0.0"
     api_prefix: str = "/api/v1"
     docs_url: str = "/docs"
 

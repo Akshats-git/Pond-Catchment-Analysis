@@ -1,7 +1,9 @@
 # Methodology
 
-How a contour map becomes a catchment area, where the pond goes, and what the evidence is
-that the numbers are right.
+How a contour map, or an area drawn on a map, becomes a catchment area, where the pond
+goes, and what the evidence is that the numbers are right. §1-7 are the analysis itself
+(Phase 2); §8 is how a drawn area feeds it from elevation tiles, and §9 the imagery
+layers (Phase 3).
 
 Every figure below is produced by the test suite and not transcribed into it. Regenerate
 with `pytest tests/test_catchment_analytic.py tests/test_massbalance.py`.
@@ -401,8 +403,10 @@ edge contact.
 interpolation cannot recover detail the contours never recorded, and near contour extremes
 it produces flat triangles. See Table 1's residual.
 
-**Land cover is not known.** The watercourse rule keeps a site out of the river. Nothing
-here keeps it out of a village, a road or somebody's field. See §3.
+**Land cover is read from imagery, roughly.** The watercourse rule keeps a site out of the
+river. Since Phase 3 the imagery layer (§9) can keep it off existing water, buildings and
+tree cover too (`avoid_unavailable_land`), but that is a colour-and-texture screen, not
+a cadastral record: it cannot know who owns a field.
 
 **The projection carries a −0.2% area bias.** The equirectangular frame uses mid-latitude
 constants (111320, 110540). At 21°N that is −0.04% east-west and −0.16% north-south
@@ -417,3 +421,101 @@ Table 1 shows.
 has a fixed twelve steps between the bed and the target, so a deeper target means coarser
 steps and the spill stage lands somewhere else. That is a property of the curve and not of
 the ground. The capacity at the requested depth is monotone, and is the figure to compare.
+
+---
+
+## 8. The map path: an area instead of a sheet
+
+Phase 3 lets a user draw an area on the map. Everything in §1-7 from the DEM onward is
+unchanged: `RasterSurface` (`app/core/raster_dem.py`) builds the same `DEM` object
+`ContourSurface` builds, and no module downstream of it was edited to accept it. That is
+the claim PLAN §8 made about the design, now tested rather than asserted.
+
+### Where the heights come from
+
+The AWS terrain-tile bucket in terrarium encoding: free, keyless, reachable from the lab
+containers, SRTM one arc-second (about 30 m) over India. Each PNG pixel decodes as
+
+    elevation = (R * 256 + G + B / 256) - 32768
+
+Tiles are fetched at zoom 13, whose pixels are 17.8 m at 21 N
+(`156543.034 * cos(lat) / 2^z`; the equatorial figure would overstate every area by 7%),
+mosaicked, and sampled bilinearly at the centre of every cell of a square metric grid in
+the same local projection the contour path uses. A missing tile is a hole, never low
+ground. Tiles are cached in memory, then on disk, and the demo region (81.18-81.42 E,
+21.13-21.37 N) is committed in `data/tiles`, so the demo does not depend on the network.
+
+### Three decisions
+
+**Analyse a margin, recommend inside the selection.** A drawn rectangle cuts across the
+landscape. If the DEM stopped at it, every catchment reaching the line would be truncated
+and every volume understated, plausibly and silently. The DEM covers the selection grown
+by 25% of its span on each side (at least 300 m); flow is routed over all of it; the
+siting step receives everything outside the selection as excluded ground, through the
+`exclusion_mask` that has been in `PondSiteSelector` since Phase 2. A polygon is a siting
+mask, never a DEM mask, for the same reason.
+
+**Adaptive resolution.** `resolution = max(tile pixel, sqrt(analysed area / 1,000,000))`.
+A million cells is the envelope the Phase 2 sheet (886,000 cells, ~300 MB) proved fits a
+512 MB container. Past 100 km² of selection the request is refused with a named 422.
+
+**Smoothing the whole-metre staircase.** SRTM heights are integers, so gentle farmland is a
+stack of flat terraces, the same failure §1 Step 3 fixes for contours, and it gets the same
+fix: the normalised NaN-aware Gaussian, here with sigma 8 m. The value was chosen by
+measurement against the survey ([VALIDATION.md](VALIDATION.md)): 8 m leaves the DEM as
+close to the survey as no smoothing (RMSE 0.26 m) while turning the resolution ensemble
+from `low` confidence into `medium`; 15 m and above begin to move divides.
+
+Downstream parameters that scale with "the spacing between measurements" (the outlet snap
+radius, the relative-elevation window, the smallest resolvable pond) read 30 m on this
+path, the spacing of SRTM's posts, where the contour path reads its contour spacing.
+
+### How far it agrees with the survey
+
+Over the provided sheet, drawn as a rectangle: elevation ranges agree to a metre, the DEMs
+to 0.26 m RMSE, the recommended site is in the same valley 400 m from the survey's, and a
+map-path catchment traces the survey's recommended one with IoU 0.53. The map-path
+catchment is 31% larger (87.0 ha against 66.3 ha) and so is its runoff. The DEMs agree so
+closely that the sheet was evidently drawn from SRTM-class data itself, so this validates
+the data path and not SRTM against the ground; where the answers differ, the 17.8 m grid
+against 3.1 m is the reason. Full table: [VALIDATION.md](VALIDATION.md).
+
+### Contours from the DEM (FR-2)
+
+`app/core/contouring.py` draws contour lines from any DEM by marching squares: corners
+classified above or below each level, the sixteen cases giving the edges crossed, saddles
+resolved by the cell-centre mean, and segments joined into lines by the integer ids of the
+edges they share, so two segments meet exactly or not at all. The result is a
+`ContourSet`, the parser's own type, so styling, thinning and rendering are reused. Every
+vertex lies on its level to 1e-6 m (tested).
+
+---
+
+## 9. Imagery: existing water and available land
+
+`app/cv/imagery.py` reads Esri World Imagery at zoom 16 (2.2 m at 21 N), resampled to a
+metric grid, and classifies each cell with three visible bands and a local texture
+measure (the standard deviation of brightness over ~15 m). No OpenCV: colour indices,
+local variance, morphological opening and connected components are each a line of numpy
+or `scipy.ndimage`.
+
+The thresholds were measured on the sample area, not assumed, and what they found was not
+the textbook rule. Village ponds here are **green** (algae and silt): their excess-green
+index (0.11-0.29) is the same as a paddy field's. What separates them is smoothness
+(texture under 0.012 against 0.015-0.05 for crops) and a slightly higher blue share
+(over 0.265). Built-up ground is scored as a *density* of rough, unvegetated pixels over
+~30 m, since a village is many roofs with lanes and trees between them, not one bright
+blob. Blobs under 1,500 m² are dropped from water (the smallest real pond on the sample is
+~2,400 m²; flooded-paddy specks are ~500 m²).
+
+One failure worth recording: the texture window straddles every shoreline, so the
+smoothness test ate a band half a window wide round each pond, 25% of a 60 m pond's area
+(tested on a synthetic pond of known size). The fix grows each qualifying core back across
+that band into pixels that are spectrally water, and only from cores already large enough
+to be ponds, since growing from every smooth speck let flooded paddies seed themselves.
+
+On the sample sheet the layer finds 39 water bodies (the river among them, and every
+village pond visible in the imagery), 4.5% built-up ground, and 84% free; a few flooded
+paddies still read as water, and tree cover is not separated from crops at this
+resolution (the trees class stays empty on the sample). It is a
+screening layer: every response says so.
