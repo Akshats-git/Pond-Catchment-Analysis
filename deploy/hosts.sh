@@ -18,7 +18,8 @@ declare -A BRIDGE_IP=([sys1]=172.17.0.30 [sys2]=172.17.0.31 [sys3]=172.17.0.32 [
 declare -A PUBLIC_PORT=([sys1]=5229 [sys2]=5230 [sys3]=5231 [sys4]=5232)
 
 GATEWAY=sys1
-WORKERS=(sys2 sys3 sys4)
+# LAB_WORKERS="sys2 sys3" leaves a host out, e.g. one with no memory to spare.
+read -r -a WORKERS <<< "${LAB_WORKERS:-sys2 sys3 sys4}"
 
 worker_urls() {
     local urls=() w
@@ -26,7 +27,23 @@ worker_urls() {
     (IFS=,; echo "${urls[*]}")
 }
 
+# The lab's network drops connections for a minute at a time, so a connection that fails
+# (ssh exit 255) is retried. Anything a command reads from stdin must come from a file,
+# `on_with <file> <host> ...`, so that a retry can send it again.
+on_with() {  # on_with <stdin file> <host> <command...>
+    local input=$1 host=$2; shift 2
+    local attempt status
+    for attempt in 1 2 3 4 5 6 7 8; do
+        ssh -o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=10 -o ServerAliveCountMax=3 \
+            -p "${SSH_PORT[$host]}" "$LAB_USER@$LAB_HOST" "$@" < "$input" && return 0
+        status=$?
+        [ $status -ne 255 ] && return $status
+        echo "  ($host: connection failed, retry $attempt)" >&2
+        sleep $((attempt * 5))
+    done
+    return 255
+}
+
 on() {  # on <host> <command...>
-    local host=$1; shift
-    ssh -o BatchMode=yes -o ConnectTimeout=8 -p "${SSH_PORT[$host]}" "$LAB_USER@$LAB_HOST" "$@"
+    on_with /dev/null "$@"
 }
