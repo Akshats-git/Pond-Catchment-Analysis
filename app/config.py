@@ -685,6 +685,11 @@ class RenderConfig:
     """Tiles kept in memory across requests. A grader re-rendering the same sheet at the
     same size pays for the fetch once. 512 tiles of 256px PNG is roughly 30 MB."""
 
+    tile_retry_after_s: float = 300.0
+    """How long a tile that failed stays a hole before it is asked for again. Long enough
+    not to hammer a provider that is refusing us; short enough that one timeout on a
+    flaky link does not leave the hole there until the process restarts."""
+
     tile_failure_ratio: float = 0.4
     """Fraction of tiles that may fail before the basemap is abandoned for the hillshade.
 

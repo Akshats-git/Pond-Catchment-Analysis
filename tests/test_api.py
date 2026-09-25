@@ -964,6 +964,7 @@ def test_a_tile_server_that_is_down_degrades_to_the_hillshade(
     """Somebody else's outage must not become this service's. A 502 here would be the
     render refusing to draw a catchment it had already computed."""
     monkeypatch.setattr(render_module, "_TILE_CACHE", type(render_module._TILE_CACHE)())
+    monkeypatch.setattr(render_module, "_TILE_FAILED", {})
 
     def unreachable(*args, **kwargs):
         raise OSError("no route to host")
@@ -986,10 +987,28 @@ def test_a_failed_tile_is_not_asked_for_twice(monkeypatch) -> None:
         calls.append(1)
         raise OSError("nope")
 
+    monkeypatch.setattr(render_module, "_TILE_FAILED", {})
     monkeypatch.setattr(render_module.urllib.request, "urlopen", unreachable)
     for _ in range(3):
         render_module._tile_bytes("https://example.invalid/1/2/3", ("sat", 1, 2, 3), settings.render)
     assert len(calls) == 1
+
+
+def test_a_failed_tile_is_asked_for_again_later(monkeypatch) -> None:
+    """On the lab's link a tile that timed out once was a hole in every later imagery
+    request until the process restarted. After tile_retry_after_s it is fetched again."""
+    monkeypatch.setattr(render_module, "_TILE_CACHE", type(render_module._TILE_CACHE)())
+    monkeypatch.setattr(render_module, "_TILE_FAILED", {})
+    clock = [1000.0]
+    monkeypatch.setattr(render_module.time, "monotonic", lambda: clock[0])
+    answers = [None, b"tile"]
+    key = ("sat", 1, 2, 3)
+
+    assert render_module._cached_tile(key, lambda: answers.pop(0)) is None
+    assert render_module._cached_tile(key, lambda: b"too soon") is None
+    clock[0] += settings.render.tile_retry_after_s + 1
+    assert render_module._cached_tile(key, lambda: answers.pop(0)) == b"tile"
+    assert render_module._cached_tile(key, lambda: b"refetched") == b"tile"
 
 
 def test_the_view_fills_the_frame_it_was_given() -> None:

@@ -32,6 +32,7 @@ from __future__ import annotations
 import io
 import math
 import threading
+import time
 import urllib.error
 import urllib.request
 from collections import OrderedDict
@@ -189,19 +190,32 @@ def fit_view(
 # Basemap
 # --------------------------------------------------------------------------- #
 _TILE_CACHE: "OrderedDict[tuple[str, int, int, int], bytes | None]" = OrderedDict()
+_TILE_FAILED: dict[tuple[str, int, int, int], float] = {}
 _TILE_LOCK = threading.Lock()
 """Shared across requests and across the threadpool's workers, so a re-render of the same
-sheet pays for the fetch once. `None` is cached too: a tile that 404s at this zoom will
-404 on every retry, and re-asking is how a service gets itself blocked."""
+sheet pays for the fetch once. A failure is cached too, but only for
+`tile_retry_after_s`: a tile that 404s will 404 on every retry, and re-asking is how a
+service gets itself blocked; but on the lab's link a tile that timed out once is usually
+there a minute later, and caching that for good left permanent holes in the imagery."""
 
 
 def _cached_tile(key, fetch) -> bytes | None:
+    now = time.monotonic()
     with _TILE_LOCK:
         if key in _TILE_CACHE:
             _TILE_CACHE.move_to_end(key)
             return _TILE_CACHE[key]
+        failed = _TILE_FAILED.get(key)
+        if failed is not None and now - failed < settings.render.tile_retry_after_s:
+            return None
     data = fetch()
     with _TILE_LOCK:
+        if data is None:
+            _TILE_FAILED[key] = time.monotonic()
+            if len(_TILE_FAILED) > settings.render.tile_cache_size:
+                _TILE_FAILED.pop(next(iter(_TILE_FAILED)))
+            return None
+        _TILE_FAILED.pop(key, None)
         _TILE_CACHE[key] = data
         _TILE_CACHE.move_to_end(key)
         while len(_TILE_CACHE) > settings.render.tile_cache_size:
