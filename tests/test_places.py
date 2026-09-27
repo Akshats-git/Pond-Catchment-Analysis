@@ -55,8 +55,29 @@ def test_an_unreachable_search_says_so(monkeypatch):
 
     monkeypatch.setattr(places.urllib.request, "urlopen", boom)
     monkeypatch.setattr(places, "_CACHE", places.OrderedDict())
+    monkeypatch.setattr(places.time, "sleep", lambda s: None)
     response = TestClient(app).get(f"{settings.api.api_prefix}/places", params={"q": "Nowhere"})
     assert response.status_code == 503 and response.json()["code"] == "places_unavailable"
+
+
+def test_a_transient_failure_is_retried_once(monkeypatch):
+    """The lab's own link resets for a few seconds at a time; one hiccup should not turn
+    into a failed search when trying again immediately would have worked."""
+    calls = []
+
+    def flaky(request, timeout=None):
+        calls.append(1)
+        if len(calls) == 1:
+            raise places.urllib.error.URLError("reset")
+        return io.BytesIO(json.dumps(PAYLOAD).encode())
+
+    monkeypatch.setattr(places.urllib.request, "urlopen", flaky)
+    monkeypatch.setattr(places, "_CACHE", places.OrderedDict())
+    monkeypatch.setattr(places.time, "sleep", lambda s: None)
+    response = TestClient(app).get(f"{settings.api.api_prefix}/places", params={"q": "Raipur"})
+    assert response.status_code == 200
+    assert len(response.json()["results"]) == 1
+    assert len(calls) == 2
 
 
 def test_a_one_letter_search_is_refused():

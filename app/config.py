@@ -520,6 +520,10 @@ class PlacesConfig:
     min_interval_s: float = 1.0
     country_codes: str = ""
     """Optional `in` to keep results inside India. Empty searches everywhere."""
+    retry_delay_s: float = 1.5
+    """The lab's outbound link resets for a few seconds at a time. One retry after this
+    pause usually lands on the other side of that; failing the whole search on the first
+    hiccup was turning a blip into "search is unavailable"."""
 
 
 @dataclass(frozen=True)

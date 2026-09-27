@@ -60,7 +60,14 @@ def search(query: str) -> list[dict]:
             with urllib.request.urlopen(request, timeout=cfg.timeout_s) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except (urllib.error.URLError, OSError, ValueError) as exc:
-            raise PlacesUnavailable(f"Nominatim could not be reached: {exc}") from exc
+            # One retry: the lab's own link resets for a few seconds at a time, and giving
+            # up on the first attempt turned that blip into a failed search every time.
+            time.sleep(cfg.retry_delay_s)
+            try:
+                with urllib.request.urlopen(request, timeout=cfg.timeout_s) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+            except (urllib.error.URLError, OSError, ValueError) as retry_exc:
+                raise PlacesUnavailable(f"Nominatim could not be reached: {retry_exc}") from retry_exc
 
     results = []
     for item in payload if isinstance(payload, list) else []:
