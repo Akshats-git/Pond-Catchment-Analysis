@@ -4,6 +4,7 @@
 #   deploy/deploy.sh                 # code + venv + restart, all four
 #   deploy/deploy.sh sys3            # just one host
 #   STRATEGY=round_robin deploy/deploy.sh sys1   # gateway with the other dispatcher
+#   LAB_WORKERS=sys2 MAX_QUEUED=4 deploy/deploy.sh sys1   # one worker, a short queue
 #
 # The containers are not git checkouts and have no rsync, so code goes over ssh as a tar
 # stream. sys2/3/4 have Python 3.12 but no numpy and no python3-venv package, so the venv
@@ -33,6 +34,7 @@ role_env() {
     if [ "$host" = "$GATEWAY" ]; then
         echo "export POND_JOBS_WORKERS=$(worker_urls "${WORKERS[@]}")"
         echo "export POND_JOBS_STRATEGY=$STRATEGY"
+        [ -n "${MAX_QUEUED:-}" ] && echo "export POND_JOBS_MAX_QUEUED=$MAX_QUEUED"
     else
         echo "export POND_JOBS_WORKERS="
     fi
