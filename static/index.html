@@ -410,6 +410,7 @@
   }
   .card:last-child { margin-bottom: 0; }
   .card:hover { border-color: var(--accent); }
+  .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .card.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-wash); }
   .card .head {
     display: flex; align-items: center; gap: 9px; padding: 10px 12px;
@@ -531,6 +532,19 @@
   .chart-key i { display: inline-block; width: 14px; height: 0; border-top: 2px solid var(--accent); vertical-align: middle; margin-right: 4px; }
   .chart-key i.b { border-top: 1.5px dashed var(--warn); }
 
+  /* modal dialog, replacing native prompt()/confirm() so it matches the rest of the page */
+  dialog#modal {
+    border: 0; border-radius: var(--radius); padding: 18px 20px;
+    width: min(360px, calc(100vw - 32px)); background: var(--panel); color: var(--ink);
+    box-shadow: var(--shadow);
+  }
+  dialog#modal::backdrop { background: color-mix(in srgb, var(--head) 55%, transparent); }
+  dialog#modal h3 { font-size: 15px; margin: 0 0 8px; }
+  dialog#modal p { font-size: 13px; color: var(--ink-soft); margin: 0 0 12px; }
+  dialog#modal p[hidden] { display: none; }
+  dialog#modal input[type=text] { width: 100%; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
   @media (max-width: 980px) {
     main { flex-direction: column; }
     #map { height: 46vh; flex: none; }
@@ -592,8 +606,8 @@
   <div class="ctl">
     <span class="lbl">Where</span>
     <div class="seg" id="mode" role="tablist" aria-label="How to choose the land">
-      <button data-mode="area" class="on" role="tab">Draw an area</button>
-      <button data-mode="sheet" role="tab" title="The more accurate path, if you have a surveyed contour sheet">I have a survey sheet</button>
+      <button data-mode="area" class="on" role="tab" aria-selected="true">Draw an area</button>
+      <button data-mode="sheet" role="tab" aria-selected="false" title="The more accurate path, if you have a surveyed contour sheet">I have a survey sheet</button>
     </div>
   </div>
 
@@ -603,13 +617,13 @@
       <form class="search" id="search" autocomplete="off">
         <svg class="glass" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
         <input type="search" id="q" placeholder="Find a village" aria-label="Find a village or town">
-        <div id="search-results" hidden></div>
+        <div id="search-results" hidden aria-live="polite"></div>
       </form>
       <div class="seg" id="tools">
-        <button data-tool="rect" title="Drag a rectangle on the map">
+        <button data-tool="rect" aria-pressed="false" title="Drag a rectangle on the map">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="4" y="6" width="16" height="12" rx="1"/></svg>Box
         </button>
-        <button data-tool="poly" title="Click the corners; double-click or press Enter to finish">
+        <button data-tool="poly" aria-pressed="false" title="Click the corners; double-click or press Enter to finish">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M5 8 12 4l7 5-3 10H8z"/></svg>Polygon
         </button>
       </div>
@@ -693,7 +707,7 @@
       <div class="f">
         <label class="k">Pour point</label>
         <div class="row">
-          <button class="btn" id="pick">Pick on the map</button>
+          <button class="btn" id="pick" aria-pressed="false">Pick on the map</button>
           <code id="pour-txt" hidden></code>
           <button class="btn" id="pick-clear" hidden>Clear</button>
         </div>
@@ -716,16 +730,16 @@
     <div id="banner"><span class="txt">Click the map to place the pour point</span><button id="banner-done" hidden>Finish</button></div>
     <div id="dropveil"><span>Drop the contour map</span></div>
     <div id="layers" class="map-ui">
-      <button data-layer="satellite" class="on">Satellite</button>
-      <button data-layer="street">Street</button>
-      <button data-layer="hillshade" title="Esri world hillshade: the shape of the ground">Terrain</button>
+      <button data-layer="satellite" class="on" aria-pressed="true">Satellite</button>
+      <button data-layer="street" aria-pressed="false">Street</button>
+      <button data-layer="hillshade" aria-pressed="false" title="Esri world hillshade: the shape of the ground">Terrain</button>
     </div>
     <div id="overlays" class="map-ui">
-      <button id="contour-toggle" disabled title="Choose a contour map first">
+      <button id="contour-toggle" disabled aria-pressed="false" title="Choose a contour map first">
         <span class="pip" aria-hidden="true"></span>
         <span class="txt">Contours</span>
       </button>
-      <button id="layers-btn" aria-expanded="false">Layers <span class="caret">&#9662;</span></button>
+      <button id="layers-btn" aria-expanded="false">Layers <span class="caret" aria-hidden="true">&#9662;</span></button>
     </div>
     <div id="layer-menu" class="map-ui" hidden>
       <h4>The answer</h4>
@@ -737,9 +751,9 @@
       <label><input type="checkbox" data-layer-toggle="land"><span class="sw" style="background:#f87171"></span>Unavailable land<small></small></label>
     </div>
     <div id="zoom" class="map-ui">
-      <button id="zoom-in" title="Zoom in">+</button>
-      <button id="zoom-out" title="Zoom out">&minus;</button>
-      <button id="zoom-fit" title="Fit everything on screen">&#9634;</button>
+      <button id="zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
+      <button id="zoom-out" title="Zoom out" aria-label="Zoom out">&minus;</button>
+      <button id="zoom-fit" title="Fit everything on screen" aria-label="Fit everything on screen">&#9634;</button>
     </div>
     <div id="legend" class="map-ui" hidden></div>
     <div id="scale"><span class="label"></span><div class="bar"></div></div>
@@ -751,6 +765,18 @@
     <div id="results"></div>
   </aside>
 </main>
+
+<dialog id="modal">
+  <form id="modal-form">
+    <h3 id="modal-title"></h3>
+    <p id="modal-message"></p>
+    <input type="text" id="modal-input" hidden aria-label="Name">
+    <div class="modal-actions">
+      <button type="button" class="btn" id="modal-cancel">Cancel</button>
+      <button type="submit" class="primary" id="modal-ok">OK</button>
+    </div>
+  </form>
+</dialog>
 
 <script>
 "use strict";
@@ -1060,6 +1086,7 @@ function syncContourButton() {
   const ready = contours.source === source && contours.group !== null;
   contourButton.disabled = !source || contours.loading;
   contourButton.classList.toggle("on", contoursDrawn());
+  contourButton.setAttribute("aria-pressed", String(contoursDrawn()));
   contourButton.classList.toggle("failed", contours.error !== null);
   // A failure has to be readable without hovering: a button that turns nothing on and
   // says nothing looks like a broken button rather than an unreadable file.
@@ -1495,7 +1522,9 @@ for (const button of document.querySelectorAll("#layers button")) {
   button.onclick = () => {
     view.layer = button.dataset.layer;
     for (const other of document.querySelectorAll("#layers button")) {
-      other.classList.toggle("on", other === button);
+      const on = other === button;
+      other.classList.toggle("on", on);
+      other.setAttribute("aria-pressed", String(on));
     }
     render();
   };
@@ -1513,6 +1542,7 @@ function setPicking(on) {
   document.querySelector("#banner .txt").textContent = "Click the map to place the pour point";
   document.getElementById("banner-done").hidden = true;
   document.getElementById("pick").classList.toggle("on", on);
+  document.getElementById("pick").setAttribute("aria-pressed", String(on));
   document.getElementById("pick").textContent = on ? "Cancel" : "Pick on the map";
 }
 function setPourPoint(lon, lat) {
@@ -1620,6 +1650,11 @@ document.addEventListener("keydown", (event) => {
     if (picking) setPicking(false);
     if (drawTool) { if (aoi.drawing) clearAoi(); setTool(null); }
     hideSearchResults();
+    if (!layerMenu.hidden) {
+      layerMenu.hidden = true;
+      layersButton.classList.remove("on");
+      layersButton.setAttribute("aria-expanded", "false");
+    }
   }
   if (drawTool === "poly" && aoi.drawing && !typing) {
     if (event.key === "Enter") { event.preventDefault(); finishPolygon(); }
@@ -1737,7 +1772,15 @@ function siteCard(site, full) {
   return h("div", {
     class: "card" + (full ? "" : " alt") + (rejected ? " rejected" : "") +
            (site.rank === selectedRank ? " sel" : ""),
+    role: "button",
+    tabindex: "0",
+    "aria-pressed": site.rank === selectedRank ? "true" : "false",
     onclick: () => selectSite(site.rank, true),
+    onkeydown: (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      selectSite(site.rank, true);
+    },
     onpointerenter: () => { hoverRank = site.rank; render(); },
     onpointerleave: () => { if (hoverRank === site.rank) { hoverRank = null; render(); } },
   }, [
@@ -1880,10 +1923,10 @@ function compact(value) {
   return value >= 1e6 ? num(value / 1e6, 1) + "M" : value >= 1e4 ? num(value / 1e3) + "k" : num(value);
 }
 
-function barChart(values, labels, { mean, unit, highlight } = {}) {
+function barChart(values, labels, { mean, unit, highlight, ariaLabel } = {}) {
   const W = 330, H = 138, L = 34, B = 18, T = 8;
   const top = niceMax(Math.max(...values, mean || 0));
-  const el = svg("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img" });
+  const el = svg("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img", "aria-label": ariaLabel });
   const bw = (W - L - 4) / values.length;
   for (const f of [0, 0.5, 1]) {
     const y = T + (H - B - T) * (1 - f);
@@ -1907,11 +1950,11 @@ function barChart(values, labels, { mean, unit, highlight } = {}) {
   return el;
 }
 
-function curveChart(xs, ys, ys2, { xfmt, yfmt, y2fmt, markX } = {}) {
+function curveChart(xs, ys, ys2, { xfmt, yfmt, y2fmt, markX, ariaLabel } = {}) {
   const W = 330, H = 150, L = 40, R = ys2 ? 38 : 8, B = 20, T = 8;
   const xMax = Math.max(...xs) || 1, yMax = niceMax(Math.max(...ys)), y2Max = ys2 ? niceMax(Math.max(...ys2)) : 1;
   const X = (v) => L + (W - L - R) * v / xMax, Y = (v, m) => T + (H - B - T) * (1 - v / m);
-  const el = svg("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img" });
+  const el = svg("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img", "aria-label": ariaLabel });
   for (const f of [0, 0.5, 1]) {
     const y = Y(yMax * f, yMax);
     el.appendChild(svg("line", { x1: L, x2: W - R, y1: y, y2: y, class: "axis" }));
@@ -1949,10 +1992,16 @@ function rainfallCharts(site) {
     const years = body.annual_totals || [];
     box.replaceChildren(
       h("div", { class: "chart-key", text: `Mean rainfall by month, ${num(body.years)} years (June to September highlighted)` }),
-      barChart(body.monthly_mm, MONTHS, { unit: "mm", highlight: monsoon }),
+      barChart(body.monthly_mm, MONTHS, { unit: "mm", highlight: monsoon,
+        ariaLabel: `Bar chart of mean monthly rainfall in millimetres across ${num(body.years)} years, `
+          + `from ${num(Math.min(...body.monthly_mm))} to ${num(Math.max(...body.monthly_mm))} mm, `
+          + "June to September highlighted as the monsoon." }),
       years.length ? h("div", { class: "chart-key", text: "Each year's total; the dashed line is the mean" }) : null,
       years.length ? barChart(years.map((y) => y.mm), years.map((y) => "’" + String(y.year).slice(2)),
-                              { mean: body.annual_rainfall_mm, unit: "mm" }) : null,
+                              { mean: body.annual_rainfall_mm, unit: "mm",
+                                ariaLabel: `Bar chart of annual rainfall totals by year, from `
+                                  + `${num(Math.min(...years.map((y) => y.mm)))} to ${num(Math.max(...years.map((y) => y.mm)))} mm, `
+                                  + `mean ${num(body.annual_rainfall_mm)} mm marked.` }) : null,
     );
   };
   if (rainCache.has(key)) fill(rainCache.get(key));
@@ -1973,6 +2022,9 @@ function storageChart(storage) {
     curveChart(depths, volumes, areas, {
       xfmt: (v) => v.toFixed(1) + " m", yfmt: (v) => compact(v) + " m³", y2fmt: (v) => compact(v) + " m²",
       markX: usable != null && usable < depths[depths.length - 1] ? usable : null,
+      ariaLabel: `Line chart of pond water volume and surface area against depth, up to `
+        + `${depths[depths.length - 1].toFixed(1)} m holding ${compact(volumes[volumes.length - 1])} cubic metres`
+        + (usable != null ? `, usable depth marked at ${usable.toFixed(1)} m` : "") + ".",
     }),
     h("div", { class: "chart-key" }, [
       h("span", null, [h("i"), "Volume held"]), h("span", null, [h("i", { class: "b" }), "Water surface"]),
@@ -2069,7 +2121,7 @@ async function saveCurrent() {
   if (!lastBody) return;
   const suggestion = lastBody.area ? `Area near ${lastBody.recommended_site.location.lat.toFixed(3)}, ${lastBody.recommended_site.location.lon.toFixed(3)}`
                                    : lastBody.input.filename;
-  const name = prompt("Name this site", suggestion);
+  const name = await promptDialog("Name this site", suggestion);
   if (!name) return;
   const payload = lastJob && lastJob.result === lastBody ? { name, job_id: lastJob.job_id } : { name, response: lastBody };
   try {
@@ -2089,6 +2141,56 @@ function toast(text, bad) {
   note.style.cssText = "position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:50;box-shadow:var(--shadow)";
   document.body.appendChild(note);
   setTimeout(() => note.remove(), 3200);
+}
+
+/* ---- a small modal, so naming a save or confirming a delete looks like the rest of the
+   page instead of dropping into the browser's own prompt()/confirm() dialog. ---- */
+const modalEl = document.getElementById("modal");
+const modalForm = document.getElementById("modal-form");
+const modalTitle = document.getElementById("modal-title");
+const modalMessage = document.getElementById("modal-message");
+const modalInput = document.getElementById("modal-input");
+const modalCancel = document.getElementById("modal-cancel");
+const modalOk = document.getElementById("modal-ok");
+
+function openDialog({ title, message, withInput, defaultValue, okLabel }) {
+  return new Promise((resolve) => {
+    modalTitle.textContent = title;
+    modalMessage.textContent = message || "";
+    modalMessage.hidden = !message;
+    modalInput.hidden = !withInput;
+    modalInput.value = defaultValue || "";
+    modalOk.textContent = okLabel || "OK";
+    modalOk.className = okLabel === "Delete" ? "btn" : "primary";
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      modalForm.removeEventListener("submit", onSubmit);
+      modalCancel.removeEventListener("click", onCancel);
+      modalEl.removeEventListener("close", onClose);
+      resolve(value);
+    };
+    const onSubmit = (event) => {
+      event.preventDefault();
+      modalEl.close();
+      finish(withInput ? modalInput.value.trim() || null : true);
+    };
+    const onCancel = () => modalEl.close();
+    // Covers Escape and the backdrop, as well as the explicit Cancel click above.
+    const onClose = () => finish(withInput ? null : false);
+    modalForm.addEventListener("submit", onSubmit);
+    modalCancel.addEventListener("click", onCancel);
+    modalEl.addEventListener("close", onClose);
+    modalEl.showModal();
+    if (withInput) { modalInput.focus(); modalInput.select(); } else { modalOk.focus(); }
+  });
+}
+function promptDialog(title, defaultValue) {
+  return openDialog({ title, withInput: true, defaultValue, okLabel: "Save" });
+}
+function confirmDialog(title, message, okLabel) {
+  return openDialog({ title, message, withInput: false, okLabel: okLabel || "Delete" });
 }
 
 async function showSaved() {
@@ -2112,7 +2214,8 @@ async function showSaved() {
     ]),
     h("button", { class: "btn", text: "Open", onclick: () => openSaved(item.id) }),
     h("button", { class: "btn", text: "Delete", onclick: async () => {
-      if (!confirm(`Delete “${item.name}”?`)) return;
+      const ok = await confirmDialog(`Delete “${item.name}”?`, "This cannot be undone.", "Delete");
+      if (!ok) return;
       await fetch(`${API}/api/v1/ponds/${item.id}`, { method: "DELETE" });
       showSaved();
     } }),
@@ -2618,7 +2721,11 @@ function syncAoi() {
 
 function setTool(tool) {
   drawTool = tool;
-  for (const b of document.querySelectorAll("#tools button")) b.classList.toggle("on", b.dataset.tool === tool);
+  for (const b of document.querySelectorAll("#tools button")) {
+    const on = b.dataset.tool === tool;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", String(on));
+  }
   mapEl.classList.toggle("drawing", !!tool);
   if (tool) { if (picking) setPicking(false); }
   const text = document.querySelector("#banner .txt");
@@ -2754,7 +2861,11 @@ function drawAoiHandles() {
 function setMode(next) {
   if (next === mode) return;
   mode = next;
-  for (const b of document.querySelectorAll("#mode button")) b.classList.toggle("on", b.dataset.mode === mode);
+  for (const b of document.querySelectorAll("#mode button")) {
+    const on = b.dataset.mode === mode;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-selected", String(on));
+  }
   document.getElementById("area-ctl").hidden = mode !== "area";
   document.getElementById("sheet-ctl").hidden = mode !== "sheet";
   setTool(null);
