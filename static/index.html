@@ -3121,6 +3121,7 @@ function applyEnsembleCapability(body) {
     "times slower.";
   if (body.ensemble_available === false) {
     ensembleBox.disabled = true;
+    ensembleBox.checked = false;
     document.getElementById("ensemble-note").textContent =
       "Not available on this host: three grids need more memory than this container has. "
       + "The area comes back without an error bar and confidence reads unassessed.";
