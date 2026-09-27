@@ -122,6 +122,21 @@
 
   .toolbar { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--line-soft); }
   .toolbar button.btn { height: 28px; font-size: 12.5px; padding: 0 10px; }
+  .caret { font-size: 9px; opacity: .7; }
+
+  /* A small dropdown, used wherever a few related actions would otherwise be a row of
+     buttons: one thing to look at instead of several. */
+  .menu-wrap { position: relative; display: inline-flex; }
+  .menu {
+    position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; min-width: 168px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 4px;
+  }
+  .menu button {
+    display: block; width: 100%; text-align: left; font: inherit; font-size: 13px; border: 0;
+    background: none; padding: 7px 9px; border-radius: 5px; cursor: pointer; color: var(--ink);
+  }
+  .menu button:hover, .menu button:focus { background: var(--accent-wash); }
   .saved-item { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--line-soft); }
   .saved-item:last-child { border-bottom: 0; }
   .saved-item .meta { flex: 1; min-width: 0; }
@@ -306,20 +321,18 @@
     border: 1px solid var(--line); border-radius: var(--radius-sm);
     box-shadow: var(--shadow); backdrop-filter: blur(6px);
   }
-  #layers { top: 12px; right: 12px; display: flex; overflow: hidden; }
-  #layers button {
+  /* One card for both rows, so the map's top-right corner reads as a single control
+     rather than a stack of separate boxes. */
+  #layer-group { top: 12px; right: 12px; overflow: hidden; }
+  #layers, #overlays { display: flex; justify-content: flex-end; }
+  #overlays { border-top: 1px solid var(--line); }
+  #layers button, #overlays button {
     border: 0; background: none; padding: 7px 12px; font: inherit; font-size: 12.5px;
     cursor: pointer; color: var(--muted);
   }
-  #layers button + button { border-left: 1px solid var(--line); }
-  #layers button.on { background: var(--accent); color: var(--on-accent); }
-
-  #overlays { top: 51px; right: 12px; display: flex; overflow: hidden; }
-  #overlays button {
-    border: 0; background: none; padding: 7px 12px; font: inherit; font-size: 12.5px;
-    cursor: pointer; color: var(--muted); display: flex; align-items: center; gap: 7px;
-  }
-  #overlays button.on { background: var(--accent); color: var(--on-accent); }
+  #overlays button { display: flex; align-items: center; gap: 7px; }
+  #layers button + button, #overlays button + button { border-left: 1px solid var(--line); }
+  #layers button.on, #overlays button.on { background: var(--accent); color: var(--on-accent); }
   #overlays button:disabled { opacity: .5; cursor: default; }
   #overlays .pip {
     width: 8px; height: 8px; border-radius: 50%; flex: none;
@@ -383,8 +396,10 @@
   #dropveil span { border: 2px dashed rgba(255,255,255,.8); border-radius: var(--radius); padding: 18px 26px; }
 
   /* ---------------- panel ---------------- */
+  /* Wider than a typical sidebar on purpose: this is where the answer lives, and the map
+     is just the evidence for it. The reader spends most of their time in here. */
   #panel {
-    width: 384px; flex: none; background: var(--panel); border-left: 1px solid var(--line);
+    width: 440px; flex: none; background: var(--panel); border-left: 1px solid var(--line);
     display: flex; flex-direction: column; min-height: 0;
   }
   #tabs { flex: none; display: none; border-bottom: 1px solid var(--line); padding: 0 8px; gap: 2px; }
@@ -496,7 +511,6 @@
   @keyframes spin { to { transform: rotate(360deg); } }
 
   /* layers popover */
-  #layers-btn .caret { font-size: 9px; opacity: .7; }
   #layer-menu {
     position: absolute; top: 90px; right: 12px; z-index: 7; width: 236px; padding: 8px 10px;
   }
@@ -547,7 +561,7 @@
 
   @media (max-width: 980px) {
     main { flex-direction: column; }
-    #map { height: 46vh; flex: none; }
+    #map { height: 40vh; flex: none; }
     #panel { width: auto; border-left: 0; border-top: 1px solid var(--line); flex: 1; }
   }
   @media (max-width: 640px) {
@@ -564,8 +578,8 @@
     #mode button { padding: 0 8px; font-size: 12.5px; }
     button.primary { width: 100%; }
     main { display: block; }
-    #map { height: 58vh; }
-    #panel { min-height: 40vh; }
+    #map { height: 50vh; }
+    #panel { min-height: 44vh; }
     #results { overflow: visible; }
     #legend { display: none; }
     #layers button { padding: 6px 9px; }
@@ -729,17 +743,19 @@
     <svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg>
     <div id="banner"><span class="txt">Click the map to place the pour point</span><button id="banner-done" hidden>Finish</button></div>
     <div id="dropveil"><span>Drop the contour map</span></div>
-    <div id="layers" class="map-ui">
-      <button data-layer="satellite" class="on" aria-pressed="true">Satellite</button>
-      <button data-layer="street" aria-pressed="false">Street</button>
-      <button data-layer="hillshade" aria-pressed="false" title="Esri world hillshade: the shape of the ground">Terrain</button>
-    </div>
-    <div id="overlays" class="map-ui">
-      <button id="contour-toggle" disabled aria-pressed="false" title="Choose a contour map first">
-        <span class="pip" aria-hidden="true"></span>
-        <span class="txt">Contours</span>
-      </button>
-      <button id="layers-btn" aria-expanded="false">Layers <span class="caret" aria-hidden="true">&#9662;</span></button>
+    <div id="layer-group" class="map-ui">
+      <div id="layers">
+        <button data-layer="satellite" class="on" aria-pressed="true">Satellite</button>
+        <button data-layer="street" aria-pressed="false">Street</button>
+        <button data-layer="hillshade" aria-pressed="false" title="Esri world hillshade: the shape of the ground">Terrain</button>
+      </div>
+      <div id="overlays">
+        <button id="contour-toggle" disabled aria-pressed="false" title="Choose a contour map first">
+          <span class="pip" aria-hidden="true"></span>
+          <span class="txt">Contours</span>
+        </button>
+        <button id="layers-btn" aria-expanded="false">Layers <span class="caret" aria-hidden="true">&#9662;</span></button>
+      </div>
     </div>
     <div id="layer-menu" class="map-ui" hidden>
       <h4>The answer</h4>
@@ -1655,6 +1671,10 @@ document.addEventListener("keydown", (event) => {
       layersButton.classList.remove("on");
       layersButton.setAttribute("aria-expanded", "false");
     }
+    for (const wrap of document.querySelectorAll(".menu-wrap")) {
+      const menu = wrap.querySelector(".menu");
+      if (menu && !menu.hidden) menu.hidden = true;
+    }
   }
   if (drawTool === "poly" && aoi.drawing && !typing) {
     if (event.key === "Enter") { event.preventDefault(); finishPolygon(); }
@@ -1894,6 +1914,20 @@ document.addEventListener("pointerdown", (event) => {
   }
 });
 
+// The export menu (and anything else built the same way) closes on an outside click. A
+// live query, not a stored reference, because the panel it lives in is rebuilt often.
+document.addEventListener("pointerdown", (event) => {
+  if (event.target.closest(".menu-wrap")) return;
+  for (const wrap of document.querySelectorAll(".menu-wrap")) {
+    const menu = wrap.querySelector(".menu");
+    if (menu && !menu.hidden) {
+      menu.hidden = true;
+      const toggle = wrap.querySelector("[aria-expanded]");
+      if (toggle) toggle.setAttribute("aria-expanded", "false");
+    }
+  }
+});
+
 function drawImageryLayers() {
   for (const kind of ["land", "water"]) {
     const data = layerState[kind] && imageryLayers[kind].data;
@@ -2101,19 +2135,31 @@ async function downloadPNG(button) {
   }
 }
 
-function exportButtons() {
-  return [
-    h("button", { class: "btn", text: "GeoJSON", title: "Every layer as one GeoJSON file", onclick: downloadGeoJSON }),
-    h("button", { class: "btn", text: "PNG map", title: "The answer drawn over imagery, as an image",
-                  onclick: (event) => downloadPNG(event.currentTarget) }),
-    h("button", { class: "btn", text: "Print", onclick: () => window.print() }),
-  ];
+// The three ways to take the answer elsewhere, folded into one menu so the toolbar reads
+// as two buttons - Save, Export - instead of four.
+function exportMenu() {
+  const menu = h("div", { class: "menu" });
+  menu.hidden = true;
+  const close = () => { menu.hidden = true; toggle.setAttribute("aria-expanded", "false"); };
+  menu.append(
+    h("button", { text: "GeoJSON", title: "Every layer as one GeoJSON file",
+                  onclick: () => { close(); downloadGeoJSON(); } }),
+    h("button", { text: "PNG map", title: "The answer drawn over imagery, as an image",
+                  onclick: async (event) => { await downloadPNG(event.currentTarget); close(); } }),
+    h("button", { text: "Print", onclick: () => { close(); window.print(); } }),
+  );
+  const toggle = h("button", { class: "btn", "aria-expanded": "false", onclick: (event) => {
+    event.stopPropagation();
+    menu.hidden = !menu.hidden;
+    toggle.setAttribute("aria-expanded", String(!menu.hidden));
+  } }, ["Export ", h("span", { class: "caret", "aria-hidden": "true", text: "▾" })]);
+  return h("div", { class: "menu-wrap" }, [toggle, menu]);
 }
 
 function resultToolbar() {
   return h("div", { class: "toolbar" }, [
     h("button", { class: "btn", text: "Save", title: "Keep this analysis under a name", onclick: saveCurrent }),
-    ...exportButtons(),
+    exportMenu(),
   ]);
 }
 
