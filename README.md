@@ -4,9 +4,6 @@ Draw a box on a map. Get back where to dig a village pond, the ground that drain
 it, and how much water it'll hold in an average year — all overlaid on the map.
 
 **[Try the live demo →](https://pond-catchment-analysis-vt7g.onrender.com)**
-*(free hosting, so it naps after 15 minutes idle — give it ~30s to wake up)*
-
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Akshats-git/Pond-Catchment-Analysis)
 
 ![Pond Catchment Analysis screenshot](docs/figures/phase3_area_result.jpg)
 
