@@ -1,0 +1,26 @@
+# Render Blueprint: one free, self-contained web service.
+#
+# No POND_JOBS_WORKERS / POND_CV_SERVICE_URL: the container analyzes and does its own
+# imagery work in-process (see docs/INSTALL.md), so the 5-container docker-compose.yml
+# fleet isn't needed for a public demo.
+#
+# Free plan has no persistent disk: .data/ponds.sqlite3 (saved analyses) and .cache/
+# (fetched elevation tiles) reset on every deploy or restart, and the service spins
+# down after 15 minutes idle (~30-50s cold start on the next request). The committed
+# demo region under data/tiles/ ships in the image either way and needs no network.
+
+services:
+  - type: web
+    name: pond-catchment-analysis
+    runtime: docker
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: POND_API_DEFAULT_ENSEMBLE
+        value: "false"
+      - key: POND_API_ALLOW_ENSEMBLE
+        value: "false"
+      - key: POND_STORE_PATH
+        value: /data/ponds.sqlite3

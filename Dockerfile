@@ -27,6 +27,9 @@ ENV POND_API_DEFAULT_ENSEMBLE=false \
     POND_STORE_PATH=/data/ponds.sqlite3
 
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
-  CMD python -c "import urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:5000/health', timeout=2)" || exit 1
+  CMD python -c "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '5000') + '/health', timeout=2)" || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5000", "--workers", "1", "--timeout-keep-alive", "65"]
+# Shell form so $PORT expands: platforms like Render assign the port at runtime and
+# route to whatever the container listens on. Local `docker run`/compose leave PORT
+# unset and get the same 5000 as before.
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-5000} --workers 1 --timeout-keep-alive 65

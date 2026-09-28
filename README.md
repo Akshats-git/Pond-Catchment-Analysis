@@ -4,6 +4,8 @@ Draw an area on a map. Get back where a village pond should go, the ground that 
 into it, and how much water that ground delivers in an average year, drawn on the map.
 Or upload a surveyed contour sheet for the same answer at survey accuracy.
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Akshats-git/Pond-Catchment-Analysis)
+
 ```bash
 docker compose up -d --build        # then open http://localhost:5229 and press "Try the sample area"
 ```
@@ -110,6 +112,15 @@ reference: [docs/API.md](docs/API.md), or `/docs` on a running service.
 
 See [docs/INSTALL.md](docs/INSTALL.md). In short: `uvicorn app.main:app` for one process,
 `docker compose up` for the whole system, `deploy/deploy.sh` for a multi-host deployment.
+
+### Deploying for free
+
+The "Deploy to Render" button above reads [render.yaml](render.yaml): one free web
+service running the same [Dockerfile](Dockerfile), self-contained (no separate workers
+or CV service — it analyzes itself). Render's free plan has no persistent disk, so
+saved analyses and the fetched-tile cache reset on every deploy or restart, and the
+service sleeps after 15 minutes idle (~30-50s to wake on the next request). The
+committed demo region still works instantly either way, no network required.
 
 ## Tests
 
