@@ -25,6 +25,12 @@ pytest.log
 .idea/
 .DS_Store
 
+# LaTeX build artefacts (docs/report/*.tex is the source of truth)
+*.aux
+*.log
+*.out
+*.toc
+
 references/
 
 # Working notes, kept local

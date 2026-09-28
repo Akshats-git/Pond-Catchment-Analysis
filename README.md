@@ -13,13 +13,6 @@ curl -X POST http://localhost:5229/api/v1/analyzeArea -H 'Content-Type: applicat
      -d '{"bbox": [81.2814, 21.2398, 81.3126, 21.2636]}'
 ```
 
-The Village Pond Planning System: Phase 1 was the high-level design, Phase 2 the contour
-analysis ([report](Pond_Catchment_Analysis_Report.pdf)), and Phase 3, this, the complete
-map-first product. The Phase 3 report is [docs/REPORT_PHASE3.md](docs/REPORT_PHASE3.md);
-the API reference [docs/API.md](docs/API.md); installation [docs/INSTALL.md](docs/INSTALL.md);
-the method and its evidence [docs/METHODOLOGY.md](docs/METHODOLOGY.md),
-[docs/VALIDATION.md](docs/VALIDATION.md) and [docs/SCALING.md](docs/SCALING.md).
-
 ## What it does
 
 1. **Choose the land.** Search for a village, then drag a box or click a polygon around
@@ -28,9 +21,9 @@ the method and its evidence [docs/METHODOLOGY.md](docs/METHODOLOGY.md),
 2. **Heights, from free data.** SRTM elevation tiles (AWS terrain tiles, keyless) for the
    selection plus a 25% margin, so streams that cross the drawn line are counted in full.
    The demo region is committed with the repository and needs no network.
-3. **The analysis,** unchanged from Phase 2: smooth, fill pits, route water downhill,
-   rank sites by how much drains to them, keep them 3 m clear of any watercourse, trace
-   each catchment, cross-check it on three more grids for an error bar.
+3. **The analysis:** smooth, fill pits, route water downhill, rank sites by how much
+   drains to them, keep them 3 m clear of any watercourse, trace each catchment,
+   cross-check it on three more grids for an error bar.
 4. **Water.** Ten years of daily rainfall for the site from Open-Meteo, SCS-CN runoff per
    rain day, and a stage-storage curve for the pond.
 5. **On the map.** The pond, its catchment, the flow network, the alternatives, contour
@@ -44,16 +37,16 @@ asynchronously and report where they are. The sample area takes about half a sec
 ## How far to trust the free-data answer
 
 The provided 1 m contour survey and the free SRTM tiles were run over the same ground
-([VALIDATION.md](docs/VALIDATION.md)): the DEMs agree to 0.26 m RMSE, the recommended site
-is in the same valley 400 m apart, and one of the map path's catchments traces the
-survey's recommended one with IoU 0.53. The map path's catchment is 31% larger (87 ha
-against 66 ha) because its grid is 17.8 m, not 3.1 m. Use the map path to find the site;
-use a survey to design the pond.
+([docs/VALIDATION.md](docs/VALIDATION.md)): the DEMs agree to 0.26 m RMSE, the
+recommended site is in the same valley 400 m apart, and the map path's catchment traces
+the survey's recommended one with IoU 0.53. The map path's catchment is 31% larger
+(87 ha against 66 ha) because its grid is 17.8 m, not 3.1 m. Use the map path to find
+the site; use a survey to design the pond.
 
 ## Under load
 
 Measured on the docker-compose stack with every container capped at 512 MB, the lab's
-limit ([SCALING.md](docs/SCALING.md)):
+limit ([docs/SCALING.md](docs/SCALING.md)):
 
 | workers | throughput | p95 |
 |---|---|---|
@@ -76,12 +69,12 @@ browser ── frontend (nginx) ── gateway ─┬─ worker ─┐
 
 One codebase, one image. What a process is depends on its environment: with
 `POND_JOBS_WORKERS` set it is a gateway (job store, result cache, least-busy dispatch,
-saved sites) and hands analyses to workers over their own job API; without it, it analyses
-itself. On the lab containers the gateway is sys1 and the workers sys2-4.
+saved sites) and hands analyses to workers over their own job API; without it, it
+analyses itself.
 
 | Path | What lives there |
 |---|---|
-| `app/core/` | The analysis. Phase 2's modules unchanged; Phase 3 added `raster_dem.py` (area to DEM), `contouring.py` (contours from a DEM) and `network.py` (the stream layer) |
+| `app/core/` | The analysis itself: DEM, hydrology, catchment delineation, siting, contouring |
 | `app/providers/` | Elevation tiles and rainfall, each behind one interface with a cache |
 | `app/pipeline.py` | `analyse` (a sheet) and `analyse_area` (an area): different front doors, one analysis |
 | `app/jobs.py` | Async jobs, the result cache, the dispatcher |
@@ -89,9 +82,10 @@ itself. On the lab containers the gateway is sys1 and the workers sys2-4.
 | `app/store.py` | Saved analyses |
 | `app/routers/` | HTTP only: validation and error mapping |
 | `static/index.html` | The page. One file, no build step, no CDN |
-| `deploy/` | The four lab containers, and nginx for compose |
+| `deploy/` | Multi-host deployment scripts and nginx config |
 | `tools/` | Tile pre-warming, the load generator and the scaling matrix |
 | `data/` | The sample contour sheet and the committed demo-region tiles |
+| `docs/` | API reference, install guide, methodology, validation, scaling and the written reports |
 
 ## Endpoints
 
@@ -115,11 +109,7 @@ reference: [docs/API.md](docs/API.md), or `/docs` on a running service.
 ## Running it
 
 See [docs/INSTALL.md](docs/INSTALL.md). In short: `uvicorn app.main:app` for one process,
-`docker compose up` for the whole system, `deploy/deploy.sh` for the lab's four containers.
-
-The Phase 2 service is deployed at **http://10.1.75.53:5229** on `stu68_sys1`.
-`deploy/deploy.sh` replaces it with the Phase 3 gateway at the same address and starts
-workers on sys2-4.
+`docker compose up` for the whole system, `deploy/deploy.sh` for a multi-host deployment.
 
 ## Tests
 
@@ -133,11 +123,7 @@ known answer. Among them: the analytic valley and the mass balance re-run throug
 raster path, the two-path agreement with the survey, and the gateway dispatching to real
 worker processes, routing around a dead one.
 
-## Status
+## Reports
 
-- [x] Phase 2 (0-12): contour analysis, API, demo page, deployment, report
-- [x] 13 Elevation provider · 14 Raster DEM · 15 `analyzeArea` · 16 Contours from the DEM
-- [x] 17 Two-path validation · 18 Area selection UI · 19 Async jobs · 20 Four-system deploy scripts
-- [x] 21 Stress and scaling (measured on compose) · 22 Front-end completion · 23 Imagery (CV)
-- [x] 24 Saved analyses · 25 docker-compose · 26 Docs
-- [ ] The Phase 3 system deployed to the lab containers, and the scaling matrix re-run there
+- [docs/REPORT_PHASE3.md](docs/REPORT_PHASE3.md) — the written report for this system
+- [docs/report/](docs/report/) — the full technical report, as LaTeX source and PDF

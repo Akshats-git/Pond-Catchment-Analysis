@@ -193,7 +193,7 @@ that ground delivers in an average year.
 
 `multipart/form-data`. Only `contour_map` is required; every other field has a derived
 or configured default, and the defaults are what the sample run in
-[REPORT.md](../REPORT.md) used.
+[the Phase 2 report](report/phase2_report.pdf) used.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
@@ -212,7 +212,7 @@ or configured default, and the defaults are what the sample run in
 > ensemble peaks at 581 MB, so it is switched off here — `POND_API_DEFAULT_ENSEMBLE=false`
 > for the default, and `POND_API_ALLOW_ENSEMBLE=false` so that an explicit `ensemble=true`
 > comes back as a `422 ensemble_unavailable` rather than being attempted. Off the
-> container both default to on. See [REPORT.md §7](../REPORT.md).
+> container both default to on. See [the Phase 2 report, §7](report/phase2_report.pdf).
 
 ### Response, 200
 
@@ -604,7 +604,7 @@ file has to change.
 | `no_buildable_ground` | Nothing on the sheet is flat enough to build on |
 | `no_ground_clear_of_watercourse` | Every candidate stands in or too near a watercourse |
 | `no_site_found` | The search finished with nothing that satisfies every rule |
-| `no_available_ground` | An `exclusion_mask` ruled out every site the terrain allows. Library callers only; see [REPORT.md §8](../REPORT.md) |
+| `no_available_ground` | An `exclusion_mask` ruled out every site the terrain allows. Library callers only; see [the Phase 2 report, §8](report/phase2_report.pdf) |
 | `exclusion_mask_shape` | An `exclusion_mask` was not built on the analysis grid. Library callers only |
 | `ensemble_unavailable` | `ensemble=true` on a host without the memory for it (this deployment) |
 | `invalid_simplify` | `/contours` asked for a tolerance outside 0–1000 m |
