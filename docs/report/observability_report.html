@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Observability for the AI-based Village Pond Planning System</title>
+<style>
+  @page {
+    size: A4;
+    margin: 22mm 20mm 24mm 20mm;
+    @bottom-center { content: counter(page); font: 9pt "Liberation Sans", sans-serif; color: #666; }
+  }
+  @page :first { @bottom-center { content: ""; } }
+  :root { --ink: #1b1f24; --muted: #5b6470; --rule: #cfd5dc; --accent: #0b5394; --wash: #f3f6f9; }
+  * { box-sizing: border-box; }
+  body { font: 11pt/1.5 "Liberation Serif", Georgia, serif; color: var(--ink); margin: 0; }
+  h1, h2, h3, th, figcaption, .meta, .label { font-family: "Liberation Sans", Arial, sans-serif; }
+  h1 { font-size: 22pt; line-height: 1.2; margin: 0 0 4pt; color: var(--ink); }
+  h2 { font-size: 14pt; margin: 22pt 0 6pt; color: var(--accent); break-after: avoid; }
+  h3 { font-size: 11pt; margin: 14pt 0 4pt; break-after: avoid; }
+  p { margin: 0 0 8pt; }
+  ul, ol { margin: 0 0 8pt; padding-left: 18pt; }
+  li { margin-bottom: 3pt; }
+  code { font: 9.5pt "Liberation Mono", monospace; background: var(--wash); padding: 0 2pt; }
+  pre { font: 8.6pt/1.4 "Liberation Mono", monospace; background: var(--wash); border: 1px solid var(--rule);
+        padding: 8pt 10pt; margin: 0 0 10pt; white-space: pre-wrap; break-inside: avoid; }
+  a { color: var(--accent); text-decoration: none; }
+
+  .title { border-bottom: 2px solid var(--accent); padding-bottom: 14pt; margin-bottom: 14pt; }
+  .kicker { font: 600 9.5pt "Liberation Sans", sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 10pt; }
+  .meta { font-size: 10.5pt; color: var(--ink); margin-top: 12pt; line-height: 1.55; }
+  .meta span { color: var(--muted); }
+  .abstract { background: var(--wash); border-left: 3px solid var(--accent); padding: 8pt 12pt; margin: 0 0 6pt; }
+  .abstract .label { font-size: 9pt; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 3pt; }
+
+  table { border-collapse: collapse; width: 100%; margin: 4pt 0 12pt; font-size: 9.6pt; break-inside: avoid; }
+  th { text-align: left; background: var(--wash); border-top: 1.5px solid var(--ink); border-bottom: 1px solid var(--ink);
+       padding: 4pt 6pt; font-size: 9pt; }
+  td { padding: 4pt 6pt; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  tr:last-child td { border-bottom: 1.5px solid var(--ink); }
+  caption { caption-side: top; text-align: left; font: 600 9.5pt "Liberation Sans", sans-serif; padding-bottom: 4pt; }
+
+  figure { margin: 8pt 0 14pt; break-inside: avoid; }
+  figure img { width: 100%; border: 1px solid var(--rule); display: block; }
+  figure.narrow img { width: 82%; margin: 0 auto; }
+  figcaption { font-size: 9pt; color: var(--muted); margin-top: 4pt; line-height: 1.4; }
+  figcaption b { color: var(--ink); }
+  .big { font-size: 10pt; }
+  .num td:nth-child(n+2), .num th:nth-child(n+2) { text-align: right; white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<div class="title">
+  <div class="kicker">CSD Assignment 1 &middot; Observability report</div>
+  <h1>Observability for the AI-based Village Pond Planning System</h1>
+  <div class="meta">
+    <b>Akshat Gupta</b><br>
+    <span>ID:</span> 12340160<br>
+    <span>Indian Institute of Technology Bhilai, Department of Data Science and Artificial Intelligence</span><br>
+    <span>Code:</span> <a href="https://github.com/Akshats-git/Pond-Catchment-Analysis">github.com/Akshats-git/Pond-Catchment-Analysis</a>
+  </div>
+</div>
+
+<div class="abstract">
+  <div class="label">Abstract</div>
+  <p>My pond planning system runs as seven containers. When an analysis is slow or fails, the cause can sit in any of them.
+  Before this work I could only see the timing table that came back with a finished job.
+  I added OpenTelemetry to the gateway, the three workers and the CV service. Every request now leaves a trace, a set of
+  metrics and a set of log lines. Grafana shows all three. One trace follows a job from the gateway to a worker and
+  down to the elevation and rainfall calls. The checks were simple. All 590 tests pass. The telemetry adds about 13 to 16 MiB
+  of memory and no measurable time. Stopping the CV container does not stop a terrain analysis. The traces already found two
+  real causes of delay: the rainfall request and one slow satellite tile.</p>
+</div>
+
+<h2>1. Introduction</h2>
+<p>The system helps a village choose a place to dig a pond. A user draws an area on a map. The system returns a pond site,
+its catchment and the water it can expect each year.</p>
+<p>In earlier work I built the analysis and split it over several containers to fit the assignment's 512 MB limit.
+That split has a cost. A request now crosses a gateway, a worker and sometimes a separate imaging service.
+If it is slow, I need to know where the time went. If it fails, I need to know which part failed.</p>
+<p>This report covers the observability work. It follows section 7.7 of my high-level design (HLD), which asks for health
+checks, metrics, dashboards and central logs on every container.</p>
+
+<h2>2. What was asked</h2>
+<p>The assignment sets the deliverables and the HLD sets the design. Table 1 lists both and says where each one is met.</p>
+
+<table>
+  <caption>Table 1. Requirements and where they are met</caption>
+  <tr><th style="width:34%">Asked for</th><th style="width:30%">Source</th><th>How it is met</th></tr>
+  <tr><td>Complete source code</td><td>Assignment, deliverables</td><td>Instrumentation is in <code>app/telemetry.py</code> and a few lines in the files it touches. All in the repository.</td></tr>
+  <tr><td>Installation guide</td><td>Assignment, deliverables</td><td>New section "Watching it" in <code>docs/INSTALL.md</code>.</td></tr>
+  <tr><td>API documentation</td><td>Assignment, deliverables</td><td>No API route was added or changed. <code>/health</code> already existed.</td></tr>
+  <tr><td>Final technical report</td><td>Assignment, deliverables</td><td>This document.</td></tr>
+  <tr><td>Cite AI tool use in the report</td><td>Assignment, LLM policy</td><td>Section 10.</td></tr>
+  <tr><td>Health endpoints on every container</td><td>HLD 7.7</td><td>Gateway, workers and CV service each answer <code>/health</code>. Docker health checks use it. Checked in section 6.4.</td></tr>
+  <tr><td>Metrics in Prometheus, shown in Grafana</td><td>HLD 7.7</td><td>Seven custom metrics plus the HTTP metrics. Services push them over OTLP. Prometheus stores them. Grafana shows them.</td></tr>
+  <tr><td>Structured, central logs</td><td>HLD 7.7</td><td>Logs go to Loki with level, source file, function, service name and trace id.</td></tr>
+  <tr><td>Degrade gracefully if the image service is down</td><td>HLD 7.7</td><td>Tested in section 6.4. A terrain analysis still finishes.</td></tr>
+</table>
+
+<h2>3. Design</h2>
+<h3>3.1 The approach</h3>
+<p>I used OpenTelemetry because it is one standard for all three signals. The code only calls the OpenTelemetry API.
+The API does nothing until the SDK is switched on. This keeps the tests and the Render deploy unchanged.</p>
+<p>The SDK starts only when the variable <code>OTEL_EXPORTER_OTLP_ENDPOINT</code> is set. Docker compose sets it.
+Nothing else does.</p>
+
+<figure class="narrow">
+<svg viewBox="0 0 640 250" width="100%" role="img" aria-label="Data flow from the services to Grafana" font-family="Liberation Sans, Arial, sans-serif" font-size="12">
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#5b6470"/></marker></defs>
+  <g fill="#f3f6f9" stroke="#8a94a0" stroke-width="1.2">
+    <rect x="10" y="20" width="150" height="40" rx="5"/><rect x="10" y="75" width="150" height="40" rx="5"/>
+    <rect x="10" y="130" width="150" height="40" rx="5"/><rect x="10" y="185" width="150" height="40" rx="5"/>
+  </g>
+  <g fill="#1b1f24" text-anchor="middle">
+    <text x="85" y="45">Gateway (api)</text><text x="85" y="100">Worker 1, 2, 3</text>
+    <text x="85" y="155">CV service</text><text x="85" y="210">Web page (nginx)</text>
+  </g>
+  <text x="85" y="238" text-anchor="middle" font-size="9.5" fill="#5b6470">the page itself sends no telemetry</text>
+  <g fill="#fff" stroke="#0b5394" stroke-width="1.5">
+    <rect x="250" y="20" width="150" height="40" rx="5"/><rect x="250" y="95" width="150" height="40" rx="5"/><rect x="250" y="170" width="150" height="40" rx="5"/>
+  </g>
+  <g fill="#1b1f24" text-anchor="middle">
+    <text x="325" y="45">Tempo (traces)</text><text x="325" y="120">Prometheus (metrics)</text><text x="325" y="195">Loki (logs)</text>
+  </g>
+  <rect x="480" y="95" width="150" height="40" rx="5" fill="#0b5394"/>
+  <text x="555" y="120" text-anchor="middle" fill="#fff">Grafana :3000</text>
+  <g stroke="#5b6470" stroke-width="1.3" fill="none" marker-end="url(#a)">
+    <path d="M160 40 H250"/><path d="M160 95 L250 115"/><path d="M160 150 L250 190"/>
+    <path d="M400 40 L480 105"/><path d="M400 115 H480"/><path d="M400 190 L480 125"/>
+  </g>
+  <text x="205" y="32" text-anchor="middle" font-size="9.5" fill="#5b6470">OTLP/HTTP</text>
+  <text x="325" y="250" text-anchor="middle" font-size="9.5" fill="#5b6470">all three inside the one "otel" container</text>
+</svg>
+<figcaption><b>Figure 1.</b> Each service sends traces, metrics and logs over OTLP to the <code>otel</code> container. Grafana reads from all three stores.</figcaption>
+</figure>
+
+<h3>3.2 What is recorded</h3>
+<table>
+  <caption>Table 2. Spans (traces)</caption>
+  <tr><th style="width:36%">Span</th><th>What it shows</th></tr>
+  <tr><td><code>POST /api/v1/jobs</code> and other routes</td><td>Each HTTP request. Added automatically. <code>/health</code> is left out because it is polled every 15 s.</td></tr>
+  <tr><td><code>job</code>, <code>dispatch</code></td><td>The job on the gateway and its hand-off to a worker. Carries the job id, the worker and the final status.</td></tr>
+  <tr><td><code>POST</code> gateway to worker</td><td>The HTTP call. It carries a <code>traceparent</code> header, so the worker joins the same trace.</td></tr>
+  <tr><td><code>job</code>, <code>analyse_area</code> on the worker</td><td>The analysis. Carries the area type, grid size, site count and any error code.</td></tr>
+  <tr><td><code>stage.elevation</code>, <code>flow</code>, <code>ensemble</code>, <code>siting</code>, <code>hydrology</code>, <code>geojson</code></td><td>One span per pipeline stage. Recorded even if the stage fails.</td></tr>
+  <tr><td><code>GET</code> (Open-Meteo, tiles)</td><td>Each outgoing web call, under the stage that made it.</td></tr>
+  <tr><td><code>imagery.tiles</code></td><td>The satellite tile fetch in the CV service.</td></tr>
+</table>
+
+<table>
+  <caption>Table 3. Metrics (exported every 5 seconds)</caption>
+  <tr><th style="width:36%">Name</th><th style="width:14%">Type</th><th>Labels and meaning</th></tr>
+  <tr><td><code>pond.analyses</code></td><td>counter</td><td>Finished analyses. Label: <code>outcome</code> = ok or error.</td></tr>
+  <tr><td><code>pond.analysis.duration</code></td><td>histogram</td><td>Seconds for one whole analysis.</td></tr>
+  <tr><td><code>pond.stage.duration</code></td><td>histogram</td><td>Seconds per pipeline stage. Label: <code>stage</code>.</td></tr>
+  <tr><td><code>pond.job.cache</code></td><td>counter</td><td>Result-cache lookups. Label: <code>result</code> = hit or miss.</td></tr>
+  <tr><td><code>pond.tiles</code></td><td>counter</td><td>Elevation tiles by source: seed, memory, disk, network or missing.</td></tr>
+  <tr><td><code>pond.jobs.queued</code></td><td>gauge</td><td>Jobs waiting for a worker.</td></tr>
+  <tr><td><code>pond.worker.in_flight</code></td><td>gauge</td><td>Jobs running on each worker.</td></tr>
+  <tr><td><code>http.server.*</code>, <code>http.client.*</code></td><td>auto</td><td>Requests by route, method and status.</td></tr>
+</table>
+<p>The two duration histograms use buckets from 0.05 s to 60 s. The default buckets are in milliseconds and would put every analysis in one bucket.</p>
+
+<h3>3.3 Logs</h3>
+<p>The standard Python <code>logging</code> module is connected to OpenTelemetry. The code logs when a job is queued, sent to a worker, finished or failed.
+It also logs when the queue is full, when a worker drops, how elevation tiles were found, and when rainfall falls back to the default.
+Each line carries the trace id and span id. That links a log line to the request that wrote it.</p>
+
+<h2>4. Implementation</h2>
+<table>
+  <caption>Table 4. Files changed</caption>
+  <tr><th style="width:38%">File</th><th>Change</th></tr>
+  <tr><td><code>app/telemetry.py</code> (new)</td><td>Instruments, <code>setup()</code>, auto-instrumentation for FastAPI, httpx and urllib.</td></tr>
+  <tr><td><code>app/pipeline.py</code></td><td>A span and a duration metric for each stage.</td></tr>
+  <tr><td><code>app/routers/analyze.py</code></td><td>The <code>analyse_area</code> span, outcome counter and logs.</td></tr>
+  <tr><td><code>app/jobs.py</code></td><td>Job and dispatch spans, cache counter, queue and worker gauges, logs.</td></tr>
+  <tr><td><code>app/providers/elevation.py</code>, <code>rainfall.py</code>, <code>app/cv/imagery.py</code></td><td>Tile counters, logs, and trace context in worker threads.</td></tr>
+  <tr><td><code>app/main.py</code>, <code>app/cv/service.py</code></td><td>One line each to start telemetry.</td></tr>
+  <tr><td><code>docker-compose.yml</code>, <code>requirements.txt</code></td><td>The <code>otel</code> service and six pinned packages.</td></tr>
+  <tr><td><code>deploy/grafana/</code>, <code>tools/generate_load.sh</code></td><td>The dashboard and a load script.</td></tr>
+</table>
+
+<h3>4.1 Problems I met</h3>
+<ul>
+  <li><b>Tile threads lost the trace.</b> Tiles are fetched in a thread pool. A new thread does not inherit the request's trace context.
+  Each tile fetch would have started its own trace. I now copy the context into each thread.</li>
+  <li><b>The job outlives the request.</b> A job runs in a background task that starts inside <code>POST /jobs</code>.
+  The task copies the context when it is created. So the job span joins the request's trace even after the response is sent.</li>
+  <li><b>Too many spans.</b> The web framework added a span for every send and receive. Turning those off cut one trace from 40 spans to 22.</li>
+  <li><b>Counters reset on restart.</b> Metrics start from zero when a container restarts. A dashboard opened right after a restart showed "No data" until I ran the load script.</li>
+</ul>
+
+<h2>5. How I tested it</h2>
+<ol>
+  <li>Ran the full test suite with telemetry off.</li>
+  <li>Started the stack with <code>docker compose up</code>. All seven containers became healthy.</li>
+  <li>Ran <code>tools/generate_load.sh</code>. It sends eight requests: six different areas on the three workers, one repeat that hits the cache, and one area in open ocean that must fail.</li>
+  <li>Read the traces in Tempo, the metrics in Prometheus and the logs in Loki.</li>
+  <li>Opened the app in a browser and ran the sample area.</li>
+  <li>Measured the cost of telemetry (6.3). Stopped the CV container and ran a job (6.4).</li>
+</ol>
+
+<h2>6. Results</h2>
+<h3>6.1 Tests and the load run</h3>
+<p>All <b>590 tests passed</b> with telemetry off. The load run gave six finished jobs on three workers, one cache hit and one expected failure (<code>no_site_found</code>).
+The cache hit used no worker and left no worker span. The failed job took about 1 s and its span carries the error code.</p>
+
+<figure>
+<img src="../figures/otel/03_trace.png" alt="Trace of one job across the gateway and a worker">
+<figcaption><b>Figure 2.</b> One job as a single trace. It starts at the gateway's <code>POST /api/v1/jobs</code>, passes through <code>job</code> and <code>dispatch</code>,
+crosses to the worker and then shows each pipeline stage. Under <code>stage.hydrology</code> the call to Open-Meteo took 994 ms. The trace has 22 spans and lasts 2.03 s.</figcaption>
+</figure>
+
+<figure>
+<img src="../figures/otel/02_dashboard.png" alt="Grafana dashboard after the load run">
+<figcaption><b>Figure 3.</b> The dashboard after the load run. Six analyses finished and one failed. The median time was 1.5 s and the 95th percentile was 3.95 s.
+The three workers took 3, 2 and 2 analyses.</figcaption>
+</figure>
+
+<h3>6.2 What the traces showed</h3>
+<table class="num">
+  <caption>Table 5. Average time per pipeline stage (six analyses)</caption>
+  <tr><th>Stage</th><th>Average</th></tr>
+  <tr><td>elevation</td><td>48.7 ms</td></tr>
+  <tr><td>flow</td><td>59.9 ms</td></tr>
+  <tr><td>ensemble (catchment cross-check)</td><td>183 ms</td></tr>
+  <tr><td>siting</td><td>76.9 ms</td></tr>
+  <tr><td><b>hydrology</b></td><td><b>1.35 s</b></td></tr>
+  <tr><td>geojson</td><td>15.4 ms</td></tr>
+</table>
+<ul>
+  <li><b>Hydrology is the slowest stage by far.</b> In the trace, almost all of it is one request to Open-Meteo for ten years of rainfall. The terrain code is fast.
+  A longer rainfall cache would help more than any change to the terrain code.</li>
+  <li><b>The load was even.</b> The least-busy dispatcher gave the workers 3, 2 and 2 analyses.</li>
+  <li><b>One slow tile can dominate a request.</b> A call to <code>/land/available</code> took 7.9 s. In its trace, 30 satellite tile requests ran in parallel and 29 of them finished in under 0.6 s.
+  One tile took <b>6.0 s</b>. Without a trace I would have blamed the image code. I have not changed this. A shorter tile timeout with one retry is the likely fix.</li>
+</ul>
+
+<figure>
+<img src="../figures/otel/04_cv_trace.png" alt="Trace of a land availability request through the gateway and the CV service">
+<figcaption><b>Figure 4.</b> A request that crosses from the gateway into the CV service. The <code>imagery.tiles</code> span lasts 6.93 s. The bars below it are the individual tile requests.
+The trace has 34 spans and two services.</figcaption>
+</figure>
+
+<h3>6.3 Cost of telemetry</h3>
+<p>I ran the same analysis 20 times, on five different areas, in one process. I did this twice with telemetry off and twice with it on.
+Rainfall was switched off so that the network did not add noise.</p>
+<table class="num">
+  <caption>Table 6. Cost of telemetry (20 analyses per run)</caption>
+  <tr><th>Run</th><th>Median</th><th>95th percentile</th><th>Peak memory</th></tr>
+  <tr><td>Off, run 1</td><td>308 ms</td><td>437 ms</td><td>159 MiB</td></tr>
+  <tr><td>On, run 1</td><td>320 ms</td><td>441 ms</td><td>175 MiB</td></tr>
+  <tr><td>Off, run 2</td><td>317 ms</td><td>451 ms</td><td>162 MiB</td></tr>
+  <tr><td>On, run 2</td><td>310 ms</td><td>430 ms</td><td>175 MiB</td></tr>
+</table>
+<p>The time differences go both ways, so they are noise. Memory is higher by <b>13 to 16 MiB</b>. A worker has 512 MiB, and the earlier scaling test peaked at 276 MiB.
+There is room for the extra memory. One caution: in these runs the exporter could not reach a server, so the cost of actually sending data is not in the numbers.
+The live stack did run at about 2 s per analysis with export on.</p>
+
+<h3>6.4 Failure and health</h3>
+<p>I stopped the CV container and sent a normal terrain request through the gateway. The job <b>finished in 2.7 s</b> on worker 1.
+The terrain analysis does not need the imaging service, as the HLD intends. I then restarted the CV container and it became healthy in under 15 s.</p>
+<p>The gateway, a worker and the CV service each returned <code>{"status":"ok"}</code> from <code>/health</code>.</p>
+
+<h3>6.5 Logs</h3>
+<p>A query for the worker's logs in Loki returned lines such as "analysis started: bbox area" and "analysis done in 2090 ms: 3 sites, 3 warnings".
+Each line has a level, the source file and function, the service name, the container id, a trace id and a span id.</p>
+
+<h2>7. Limits</h2>
+<ul>
+  <li><b>Not run on the lab machines.</b> I ran everything on my own computer. The <code>otel</code> image is about 2.7 GB and is outside the 512 MB limit. On the lab and on Render the endpoint is not set, so nothing is sent.</li>
+  <li><b>Push, not scrape.</b> The HLD says Prometheus scrapes metrics. Here the services push metrics over OTLP and Prometheus stores them. The result in Grafana is the same.</li>
+  <li><b>Overhead is partly measured.</b> The test in section 6.3 did not include the cost of sending data over the network.</li>
+  <li><b>Small sample.</b> The load run has eight requests. It shows the setup works. It is not a performance study.</li>
+  <li><b>No alerts.</b> Nothing pages anyone. The dashboard is for looking at.</li>
+  <li><b>Default login.</b> Grafana uses <code>admin</code> / <code>admin</code>. That is fine on my machine and not fine on a shared server.</li>
+  <li><b>The slow tile is not fixed.</b> The trace found it. I did not change the timeout.</li>
+</ul>
+
+<h2>8. Conclusion</h2>
+<p>The system can now explain itself. One trace shows where a request spent its time, across three kinds of service.
+The metrics show the health of the whole stack. The logs link back to the request that wrote them.
+The cost is small and the whole thing is off unless asked for. The first traces already pointed to two causes of delay that I had not seen before.</p>
+
+<h2>9. How to run it</h2>
+<pre>docker compose up -d --build
+tools/generate_load.sh
+# open http://localhost:3000  (admin / admin)
+#   Explore > Tempo   one trace per request
+#   Explore > Loki    {service_name="pond-worker"}
+#   Dashboards        Pond Catchment - OpenTelemetry</pre>
+<p>The steps are also in <code>docs/INSTALL.md</code>, under "Watching it".</p>
+
+<h2>10. AI tool usage declaration</h2>
+<p>I used an AI assistant, Claude from Anthropic, on this work. It helped me write the instrumentation code, set up the Grafana stack and the dashboard,
+run the checks in this report and draft this report. It did not design the pond analysis itself, which was built earlier.</p>
+<p>I ran the tests and the measurements on my own computer. The numbers in this report come from those runs.
+The code and the full history are in the repository.</p>
+
+<h2>11. Repository</h2>
+<p>Code and documentation: <a href="https://github.com/Akshats-git/Pond-Catchment-Analysis">github.com/Akshats-git/Pond-Catchment-Analysis</a>.<br>
+Main files for this work: <code>app/telemetry.py</code>, <code>docker-compose.yml</code>, <code>deploy/grafana/pond-dashboard.json</code>, <code>tools/generate_load.sh</code>, <code>docs/INSTALL.md</code>.</p>
+
+</body>
+</html>

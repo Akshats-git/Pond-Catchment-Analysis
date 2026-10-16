@@ -44,7 +44,8 @@ Tests: `pip install pytest` then `pytest` (588 tests, about three minutes, no ne
 docker compose up -d --build
 ```
 
-Open **http://localhost:5229**. Six containers:
+Open **http://localhost:5229**. Seven containers (the seventh, `otel`, is the Grafana
+stack described below):
 
 ```
                        ┌───────────────┐
@@ -70,6 +71,26 @@ environment variables when running `docker compose up`:
 POND_JOBS_STRATEGY=round_robin docker compose up -d api     # the other dispatcher
 POND_WORKERS=http://worker1:5000 docker compose up -d api   # one worker only
 ```
+
+### Watching it
+
+The `otel` container collects traces, metrics and logs from the other services. Open
+**http://localhost:3000** (user `admin`, password `admin`) after `docker compose up`.
+
+```bash
+tools/generate_load.sh                       # sends a few varied analyses
+curl -u admin:admin -H 'Content-Type: application/json' \
+     -d @deploy/grafana/pond-dashboard.json http://localhost:3000/api/dashboards/db
+```
+
+- **Explore > Tempo** shows one trace per request, across the gateway, a worker and the CV service.
+- **Explore > Loki** shows the logs. Try `{service_name="pond-worker"}`.
+- **Dashboards > Pond Catchment - OpenTelemetry** shows the metrics.
+
+Telemetry only runs when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Compose sets it. Without it
+(one process, the tests, the Render deploy) nothing is sent. To turn it off in compose,
+delete that line from `docker-compose.yml`. The `otel` image is about 2.7 GB and is not
+part of the 512 MB limit.
 
 `python -m tools.scaling` runs the stress matrix against this stack and rewrites
 [SCALING.md](SCALING.md). `docker compose down` stops it; add `-v` to also delete the

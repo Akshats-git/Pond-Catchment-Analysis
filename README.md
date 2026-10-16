@@ -97,4 +97,4 @@ so a run takes about three minutes and reproduces the same result every time.
   [docs/report/](docs/report/) for the full technical report as LaTeX source and PDF
 - [docs/METHODOLOGY.md](docs/METHODOLOGY.md) — the hydrology and siting method
 - [docs/SCALING.md](docs/SCALING.md) — throughput and memory under load
-- [docs/REPORT_OBSERVABILITY.md](docs/REPORT_OBSERVABILITY.md) — traces, metrics and logs across the services
+- [docs/report/observability_report.pdf](docs/report/observability_report.pdf) — traces, metrics and logs across the services
