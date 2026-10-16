@@ -29,6 +29,7 @@ from typing import Callable, Iterator
 
 import numpy as np
 
+from app import telemetry
 from app.config import Settings, settings
 from app.core.catchment import CatchmentEnsemble
 from app.core.dem_builder import DEM, ContourSurface
@@ -84,12 +85,17 @@ class Stopwatch:
         if self._on_stage is not None:
             self._on_stage(name)
         start = time.perf_counter()
-        try:
-            yield
-        finally:
-            # Recorded even when the stage raises, so a timeout or a crash still says
-            # which step consumed the request.
-            self.timings_ms[name] = round((time.perf_counter() - start) * 1e3, 1)
+        # One span per stage, so a trace shows where the time went; an exception inside
+        # is recorded on the span and the stage is still timed below.
+        with telemetry.tracer.start_as_current_span(f"stage.{name}"):
+            try:
+                yield
+            finally:
+                # Recorded even when the stage raises, so a timeout or a crash still says
+                # which step consumed the request.
+                elapsed = time.perf_counter() - start
+                self.timings_ms[name] = round(elapsed * 1e3, 1)
+                telemetry.stage_duration.record(elapsed, {"stage": name})
 
     def finish(self) -> dict[str, float]:
         elapsed = (time.perf_counter() - self._started) * 1e3

@@ -27,6 +27,7 @@ every run, which is the only way a reported figure can be checked.
 from __future__ import annotations
 
 import json
+import logging
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -38,6 +39,8 @@ from datetime import date
 import numpy as np
 
 from app.config import HydrologyConfig, RainfallConfig, settings
+
+log = logging.getLogger("pond.rainfall")
 
 __all__ = [
     "RainfallSeries",
@@ -359,6 +362,7 @@ def rainfall_for(
     try:
         return (live or _LIVE).daily_series(lon, lat)
     except RainfallUnavailable as exc:
+        log.warning("rainfall: live feed unavailable, using the regional default: %s", exc)
         return DefaultRainfallProvider(
             config=cfg,
             reason=(

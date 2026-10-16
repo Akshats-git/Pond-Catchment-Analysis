@@ -4,6 +4,8 @@
 #   api       the gateway: jobs, cache, dispatch, saved  (HLD container 2)
 #   worker1-3 analyses, one at a time each               (the lab's sys2-4)
 #   cv        imagery: existing water, land availability (HLD container 3)
+#   otel      Grafana's all-in-one OpenTelemetry backend: collector, Tempo (traces),
+#             Prometheus (metrics), Loki (logs) and Grafana on :3000
 #   pond-db   the saved-analyses database, a SQLite file on a named volume
 #             (HLD container 4: one file needs no server of its own)
 #
@@ -18,6 +20,8 @@ x-pond: &pond
   environment: &pond-env
     POND_CV_SERVICE_URL: http://cv:5000
     POND_JOBS_WORKERS: ""
+    # Telemetry goes to the `otel` service below. Unset this to run with it switched off.
+    OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel:4318}
 
 services:
   frontend:
@@ -48,7 +52,15 @@ services:
     <<: *pond
     command: ["uvicorn", "app.cv.service:app", "--host", "0.0.0.0", "--port", "5000", "--workers", "1"]
 
+  # Not part of the 512 MB envelope: this is the observability tooling, not the app.
+  otel:
+    image: grafana/otel-lgtm:latest
+    restart: unless-stopped
+    ports: ["3000:3000"]
+    volumes: ["otel-data:/data"]
+
 volumes:
+  otel-data:
   pond-db:
   tiles1:
   tiles2:

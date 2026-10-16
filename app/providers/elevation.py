@@ -26,7 +26,9 @@ demo day.
 
 from __future__ import annotations
 
+import contextvars
 import io
+import logging
 import math
 import os
 import threading
@@ -44,7 +46,10 @@ import numpy as np
 from PIL import Image
 from scipy.ndimage import map_coordinates
 
+from app import telemetry
 from app.config import ElevationConfig, settings
+
+log = logging.getLogger("pond.elevation")
 
 __all__ = [
     "ElevationUnavailable",
@@ -296,13 +301,23 @@ class TileProvider(ElevationProvider):
         origins: Counter = Counter()
         started = time.perf_counter()
         with ThreadPoolExecutor(max_workers=max(1, cfg.tile_workers)) as pool:
-            results = pool.map(lambda xy: self.tile(zoom, *xy), wanted)
+            # Each tile runs in a pool thread, which does not inherit the request's trace
+            # context on its own; a copy per tile keeps its fetch under the same trace.
+            results = pool.map(
+                lambda job: job[0].run(self.tile, zoom, *job[1]),
+                [(contextvars.copy_context(), xy) for xy in wanted],
+            )
             for (x, y), (heights, origin) in zip(wanted, results):
                 origins[origin] += 1
                 if heights is None:
                     continue
                 r, c = (y - y0) * TILE_SIZE, (x - x0) * TILE_SIZE
                 mosaic[r : r + TILE_SIZE, c : c + TILE_SIZE] = heights
+
+        for origin, count in origins.items():
+            telemetry.tile_sources.add(count, {"source": origin})
+        log.info("elevation: %d tiles %s in %.0f ms", len(wanted), dict(origins),
+                 (time.perf_counter() - started) * 1e3)
 
         missing = origins.get("missing", 0)
         if missing == len(wanted):

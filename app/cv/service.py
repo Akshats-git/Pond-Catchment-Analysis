@@ -18,6 +18,7 @@ from fastapi.concurrency import run_in_threadpool
 from PIL import Image
 from scipy import ndimage
 
+from app import telemetry
 from app.config import settings
 from app.core.geojson import GeoJSONError, feature_collection, mask_geometry
 from app.core.raster_dem import AreaError, AreaOfInterest, polygon_mask
@@ -160,6 +161,7 @@ def land_classes_png(bbox, *, fetch=None) -> tuple[bytes, dict]:
 # Container 3: the same functions as a service of their own
 # --------------------------------------------------------------------------- #
 app = FastAPI(title="Pond CV service", version=settings.api.version)
+telemetry.setup(app, "pond-cv")
 
 
 def _error(exc) -> Response:

@@ -71,6 +71,17 @@ ground ([docs/VALIDATION.md](docs/VALIDATION.md)): the two DEMs agree to 0.26 m 
 and both recommend a pond in the same valley, 400 m apart. Good enough to find the
 site — for construction, still survey it.
 
+## Observability
+
+`docker compose up` also starts a Grafana stack with OpenTelemetry traces, metrics and logs
+from the gateway, the workers and the CV service. Run `tools/generate_load.sh`, then open
+<http://localhost:3000> (admin / admin). Explore > Tempo shows one trace per job, from the
+gateway through to the worker's pipeline stages and the elevation and rainfall calls it
+makes. The dashboard is imported with `deploy/grafana/pond-dashboard.json`. Telemetry is off
+unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set, so the tests and the Render deploy are unchanged.
+
+![One job traced across services](docs/figures/otel/03_trace.png)
+
 ## Tests
 
 ```bash

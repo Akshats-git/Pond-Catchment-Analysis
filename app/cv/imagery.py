@@ -30,6 +30,7 @@ here before digging", and every response says so; it is not a cadastral survey.
 
 from __future__ import annotations
 
+import contextvars
 import math
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -38,6 +39,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy import ndimage
 
+from app import telemetry
 from app.config import CVConfig, settings
 from app.core.dem_builder import DEM, DEMMetadata
 from app.core.projection import EquirectangularENU
@@ -174,8 +176,13 @@ def fetch_imagery(
     mosaic = np.zeros(((y1 - y0 + 1) * TILE, (x1 - x0 + 1) * TILE, 3), dtype=np.uint8)
     present = np.zeros(mosaic.shape[:2], dtype=bool)
     missing = 0
-    with ThreadPoolExecutor(max_workers=settings.render.tile_workers) as pool:
-        for (x, y), data in zip(wanted, pool.map(lambda xy: get(zoom, *xy), wanted)):
+    # A context copy per tile keeps each pool-thread fetch inside the request's trace.
+    jobs = [(contextvars.copy_context(), xy) for xy in wanted]
+    with telemetry.tracer.start_as_current_span("imagery.tiles") as span, ThreadPoolExecutor(
+        max_workers=settings.render.tile_workers
+    ) as pool:
+        span.set_attribute("pond.tiles", len(wanted))
+        for (x, y), data in zip(wanted, pool.map(lambda job: job[0].run(get, zoom, *job[1]), jobs)):
             try:
                 tile = np.asarray(Image.open(BytesIO(data)).convert("RGB"), dtype=np.uint8) if data else None
             except Exception:  # noqa: BLE001, a bad tile is a hole

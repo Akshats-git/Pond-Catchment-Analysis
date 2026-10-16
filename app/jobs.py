@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import logging
 import threading
 import time
 import uuid
@@ -33,7 +34,12 @@ from typing import Any, Callable
 
 import httpx
 
+from opentelemetry.metrics import Observation
+
+from app import telemetry
 from app.config import JobsConfig, settings
+
+log = logging.getLogger("pond.jobs")
 
 __all__ = ["Job", "JobStore", "Dispatcher", "STAGE_WEIGHTS", "dispatcher"]
 
@@ -223,6 +229,14 @@ class Dispatcher:
         self._condition: asyncio.Condition | None = None
         self._queued = 0
         self._tasks: set[asyncio.Task] = set()
+        telemetry.meter.create_observable_gauge(
+            "pond.jobs.queued", unit="{job}", description="Jobs waiting for a worker slot.",
+            callbacks=[lambda _: [Observation(self._queued)]],
+        )
+        telemetry.meter.create_observable_gauge(
+            "pond.worker.in_flight", unit="{job}", description="Jobs running on each worker.",
+            callbacks=[lambda _: [Observation(w.in_flight, {"worker": w.url}) for w in self.workers]],
+        )
 
     @property
     def role(self) -> str:
@@ -238,7 +252,9 @@ class Dispatcher:
         """Create a job and start it. A repeated request is answered from the cache."""
         cached = self.store.cached(key)
         job = Job(id=uuid.uuid4().hex[:16], request=request_body, key=key)
+        telemetry.job_cache.add(1, {"result": "hit" if cached is not None else "miss"})
         if cached is not None:
+            log.info("job %s answered from the result cache", job.id)
             job.status = job.stage = "done"
             job.progress = 1.0
             job.cached = True
@@ -248,25 +264,35 @@ class Dispatcher:
             return self.store.add(job)
 
         if self._queued >= self.config.max_queued:
+            log.warning("job rejected: queue full (%d waiting)", self._queued)
             raise BusyError(
                 f"{self._queued} analyses are already waiting; the limit is "
                 f"{self.config.max_queued}."
             )
         self.store.add(job)
         self._queued += 1
+        log.info("job %s queued (%d waiting)", job.id, self._queued)
         task = asyncio.get_running_loop().create_task(self._run(job))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return job
 
     async def _run(self, job: Job) -> None:
-        try:
-            if self.workers:
-                await self._run_remote(job)
-            else:
-                await self._run_local(job)
-        except Exception as exc:  # noqa: BLE001, a job must end in a state, whatever happens
-            self._fail(job, "internal_error", f"The analysis failed unexpectedly: {exc}", "")
+        # The task was created inside the POST /jobs request, so this span joins that
+        # request's trace even though the request has long since returned.
+        with telemetry.tracer.start_as_current_span("job") as span:
+            span.set_attribute("pond.job.id", job.id)
+            span.set_attribute("pond.dispatch", "gateway" if self.workers else "local")
+            try:
+                if self.workers:
+                    await self._run_remote(job)
+                else:
+                    await self._run_local(job)
+            except Exception as exc:  # noqa: BLE001, a job must end in a state, whatever happens
+                log.exception("job %s crashed", job.id)
+                self._fail(job, "internal_error", f"The analysis failed unexpectedly: {exc}", "")
+            span.set_attribute("pond.job.status", job.status)
+            span.set_attribute("pond.job.worker", job.worker or "")
 
     def _finish(self, job: Job, result: dict) -> None:
         with self.store.lock:
@@ -275,6 +301,7 @@ class Dispatcher:
             job.result = result
             job.finished = time.time()
         self.store.remember(job.key, result)
+        log.info("job %s done on %s in %.2f s", job.id, job.worker, job.finished - job.created)
 
     def _fail(self, job: Job, code: str, detail: str, hint: str, status: int = 500) -> None:
         with self.store.lock:
@@ -283,6 +310,7 @@ class Dispatcher:
             job.status = job.stage = "failed"
             job.error = {"status": status, "code": code, "detail": detail, "hint": hint}
             job.finished = time.time()
+        log.warning("job %s failed: %s - %s", job.id, code, detail)
 
     # ---- here ---- #
     async def _run_local(self, job: Job) -> None:
@@ -376,9 +404,13 @@ class Dispatcher:
                     job.stage = "dispatched"
                     job.worker = worker.url
                     job.started = job.started or time.time()
+                log.info("job %s dispatched to %s", job.id, worker.url)
                 try:
-                    outcome = await self._drive(client, worker, job, prefix)
+                    with telemetry.tracer.start_as_current_span("dispatch") as span:
+                        span.set_attribute("pond.worker", worker.url)
+                        outcome = await self._drive(client, worker, job, prefix)
                 except (httpx.HTTPError, OSError) as exc:
+                    log.warning("worker %s failed on job %s: %s", worker.url, job.id, exc)
                     worker.healthy = False
                     worker.checked = time.time()
                     worker.last_error = str(exc) or exc.__class__.__name__

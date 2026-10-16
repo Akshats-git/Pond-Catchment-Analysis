@@ -40,7 +40,9 @@ analysis of the same sheet is queued or running.
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
+import time
 import weakref
 
 import anyio
@@ -48,6 +50,7 @@ from fastapi import APIRouter, File, Form, Query, Response, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from pydantic import ValidationError
 
+from app import telemetry
 from app.config import settings
 from dataclasses import replace
 
@@ -77,6 +80,7 @@ from app.schemas.responses import (
 
 __all__ = ["UPLOAD_FIELD", "UPLOAD_FIELD_ALIAS", "router"]
 
+log = logging.getLogger("pond.analysis")
 router = APIRouter(tags=["analysis"])
 
 _ACCEPTED_SUFFIXES = (".kml", ".kmz")
@@ -854,13 +858,41 @@ def area_exclusion(request: AreaRequest):
 
 
 def run_area(request: AreaRequest, progress=None):
-    """The whole map-path analysis, synchronously, as the job runner and the route share it."""
-    return analyse_area(
-        request.area(),
-        request.params(),
-        exclusion_mask=area_exclusion(request),
-        progress=progress,
-    )
+    """The whole map-path analysis, synchronously, as the job runner and the route share it.
+
+    This is the root of the analysis in a trace: the stage spans, the tile and rainfall
+    fetches and the imagery call all hang off it, and the outcome and duration metrics are
+    recorded here so the sync route and the job API report the same way.
+    """
+    started = time.perf_counter()
+    outcome = "error"
+    with telemetry.tracer.start_as_current_span("analyse_area") as span:
+        try:
+            area = request.area()
+            span.set_attribute("pond.aoi.kind", area.kind)
+            log.info("analysis started: %s area", area.kind)
+            result = analyse_area(
+                area, request.params(), exclusion_mask=area_exclusion(request), progress=progress,
+            )
+            outcome = "ok"
+            span.set_attribute("pond.dem.cells", int(result.dem.shape[0] * result.dem.shape[1]))
+            span.set_attribute("pond.sites", len(result.sites))
+            log.info(
+                "analysis done in %.0f ms: %d sites, %d warnings",
+                result.timings_ms.get("total", 0.0), len(result.sites), len(result.warnings),
+            )
+            return result
+        except Exception as exc:
+            # The pipeline's own failures (no site, unreachable tiles) are expected
+            # outcomes; they are logged as warnings, not stack traces.
+            code = getattr(exc, "code", exc.__class__.__name__)
+            span.set_attribute("pond.error.code", str(code))
+            log.warning("analysis failed: %s - %s", code, exc)
+            raise
+        finally:
+            elapsed = time.perf_counter() - started
+            telemetry.analyses.add(1, {"outcome": outcome})
+            telemetry.analysis_duration.record(elapsed, {"outcome": outcome})
 
 
 async def analyse_area_guarded(request: AreaRequest):

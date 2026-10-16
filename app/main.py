@@ -19,6 +19,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from app import telemetry
 from app.config import settings
 from app.errors import install_handlers
 from app.routers.analyze import UPLOAD_FIELD, UPLOAD_FIELD_ALIAS
@@ -136,6 +137,10 @@ def create_app() -> FastAPI:
         return app.openapi_schema
 
     app.openapi = openapi
+
+    # No-op unless OTEL_EXPORTER_OTLP_ENDPOINT is set. The role is the same one /health
+    # reports: workers configured means this process is the gateway.
+    telemetry.setup(app, "pond-gateway" if settings.jobs.workers else "pond-worker")
 
     if STATIC_DIR.is_dir():
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
