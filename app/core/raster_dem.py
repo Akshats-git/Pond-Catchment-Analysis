@@ -3,12 +3,12 @@
 `ContourSurface` turns a contour sheet into a `DEM`. `RasterSurface` turns a selection on
 the map into one, from elevation tiles. Everything downstream (flow, catchment, siting,
 runoff, GeoJSON) takes a `DEM` and never learns which of the two made it. That is the seam
-PLAN §8 promised and PLAN3 §2 tests, and this module is the only new thing on the far
+the design promises, and this module is the only new thing on the far
 side of it.
 
 Three decisions here decide whether the answer is right, not just whether it runs.
 
-**Analyse a buffer, recommend inside the selection** (PLAN3 §5.3). A drawn rectangle is an
+**Analyse a buffer, recommend inside the selection**. A drawn rectangle is an
 arbitrary cut across the landscape. If the DEM stopped at it, every catchment touching the
 line would be truncated and every volume understated, silently and plausibly. So the DEM
 covers the selection grown by `aoi_buffer` on every side, flow is routed across all of it,
@@ -20,7 +20,7 @@ heights to the polygon would reintroduce exactly the truncation the buffer exist
 
     resolution = max(native tile resolution, sqrt(analysed area / cell_budget))
 
-A million cells is the envelope the Phase 2 sheet already proved fits.
+A million cells is the envelope the survey sheet already proved fits.
 
 **Whole-metre heights are a staircase.** SRTM stores integer metres, so gentle farmland is
 a stack of flat terraces with one-metre risers, and on a flat D8 has no downhill to pick.
@@ -192,7 +192,7 @@ class AreaOfInterest:
     def check_size(self, config: ElevationConfig | None = None) -> None:
         """Refuse a selection too small to hold a catchment or too big for the host.
 
-        A named 422 rather than an attempt, for the reason Phase 2 established with
+        A named 422 rather than an attempt, for the reason established with
         `ensemble_unavailable`: an OOM takes every request on the worker down with it.
         """
         cfg = config or settings.elevation

@@ -1,7 +1,7 @@
-"""Phase 1. KML/KMZ contour parser.
+"""KML/KMZ contour parser.
 
 Two kinds of test here. The first block pins the parser against the *provided* sample
-sheet: those numbers are the Phase 1 acceptance criteria and must not drift. The second
+sheet: those numbers are the parser acceptance criteria and must not drift. The second
 block runs the structural variants, which is what makes the claim "this works on contour
 files other than the one we were given" checkable rather than asserted.
 """
@@ -27,7 +27,7 @@ def sample():
 
 
 def test_sample_acceptance_numbers(sample):
-    """PLAN Phase 1: 1,355 lines, 159,113 vertices, 32 levels, 267-298 m."""
+    """1,355 lines, 159,113 vertices, 32 levels, 267-298 m."""
     m = sample.metadata
     assert m.line_count == 1355
     assert m.vertex_count == 159113
@@ -79,7 +79,7 @@ def test_sample_arrays_are_structurally_consistent(sample):
 
 
 def test_every_vertex_carries_its_own_contour_elevation(sample):
-    """PLAN §2 Step 1. The whole basis of the DEM."""
+    """Step 1. The whole basis of the DEM."""
     for i in (0, 1, 700, sample.line_count - 1):
         block = sample.elevations[sample.line_starts[i] : sample.line_starts[i + 1]]
         assert np.all(block == sample.line_elevations[i])
@@ -222,7 +222,7 @@ def test_kmz_with_a_non_standard_member_name():
 # Units
 # --------------------------------------------------------------------------- #
 def test_feet_interval_is_flagged_and_not_converted():
-    """PLAN Phase 1: detect feet-vs-metres, flag it, never silently convert."""
+    """detect feet-vs-metres, flag it, never silently convert."""
     cs = parse_contours(mv.feet_interval())
     assert cs.metadata.interval_m == pytest.approx(5.0)
     assert cs.metadata.elevation_range == (100.0, 110.0)  # unchanged

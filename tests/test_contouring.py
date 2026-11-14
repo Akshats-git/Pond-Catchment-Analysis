@@ -1,4 +1,4 @@
-"""Phase 16. Contours generated from a DEM (FR-2), and the bbox modes that use them."""
+"""Contours generated from a DEM, and the bbox modes that use them."""
 
 from __future__ import annotations
 

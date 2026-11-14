@@ -21,8 +21,8 @@ uniform scale error cancels when D8 compares one neighbour against another.
 
 The frame is exactly invertible and has no dependencies, and both scale constants live in
 `config.py`, so a deployment at a very different latitude can correct them without
-touching code. The `Projection` interface exists so Phase 3 can drop in pyproj/UTM for
-larger regions without touching anything downstream (PLAN §8); that is also the clean
+touching code. The `Projection` interface exists so a later version can drop in pyproj/UTM for
+larger regions without touching anything downstream; that is also the clean
 place to remove the scale bias entirely, should a later phase want it.
 
 The one place the flat-earth assumption has to be paid back is area. Because the scale
@@ -30,7 +30,7 @@ factor is the *constant* cos(lat0), a square cell of side `res` in projected spa
 
     res^2 * cos(lat_cell) / cos(lat0)
 
-square metres on the ground. This is the latitude weighting of PLAN §2 Step 6.
+square metres on the ground. This is the latitude weighting of Step 6.
 """
 
 from __future__ import annotations
@@ -50,8 +50,8 @@ class Projection(ABC):
     """Maps lon/lat in degrees to a local metric frame and back.
 
     Implementations must be exactly invertible: `inverse(forward(p)) == p` to within
-    floating-point noise. Phase 4 rounds real-world coordinates onto grid indices and
-    back, and a lossy round trip there silently returns the wrong cell (PLAN §11.8).
+    floating-point noise. Catchment tracing rounds real-world coordinates onto grid indices and
+    back, and a lossy round trip there silently returns the wrong cell.
     """
 
     @property

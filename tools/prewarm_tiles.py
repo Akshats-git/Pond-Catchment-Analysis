@@ -1,6 +1,6 @@
 """Fetch elevation tiles for a region into the committed seed directory.
 
-The demo must not depend on the network (PLAN3 §10). Run this once for the demo region and
+The demo must not depend on the network. Run this once for the demo region and
 commit `data/tiles/`; the provider then reads those tiles before it ever tries the network.
 
     python -m tools.prewarm_tiles                       # the sample sheet, z10-z13

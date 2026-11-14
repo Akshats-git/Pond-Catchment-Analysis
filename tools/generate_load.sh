@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # A small, varied workload for the telemetry demo: fresh areas on different workers,
 # a repeat (result-cache hit) and an area with no pond site (a failed job).
-# Usage: tools/generate_load.sh [base_url]   (default http://localhost:5229)
+# Usage: tools/generate_load.sh [base_url]   (default http://localhost:8080)
 set -u
-U="${1:-http://localhost:5229}/api/v1"
+U="${1:-http://localhost:8080}/api/v1"
 
 run() {
   local id st

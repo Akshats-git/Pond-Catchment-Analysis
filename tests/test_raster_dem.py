@@ -1,4 +1,4 @@
-"""Phase 14. A drawn area to a DEM.
+"""A drawn area to a DEM.
 
 The raster path has to satisfy the same invariants as the contour path, or the claim
 that `core/` cannot tell the two apart is only a claim. So the analytic valley and the mass
@@ -137,7 +137,7 @@ def test_the_sheet_grid_is_native_z13(sheet_dem):
 
 
 def test_the_raster_path_is_thirty_times_smaller_than_the_contour_path(sheet_dem):
-    """PLAN3 §3.1: 886,000 cells on the contour path; tens of thousands here."""
+    """: 886,000 cells on the contour path; tens of thousands here."""
     assert sheet_dem.shape[0] * sheet_dem.shape[1] < 70_000
 
 

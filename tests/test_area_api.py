@@ -1,4 +1,4 @@
-"""Phase 15. `POST /analyzeArea`, the map path through the HTTP surface.
+"""`POST /analyzeArea`, the map path through the HTTP surface.
 
 Runs on the committed seed tiles for the sample sheet, so it is offline and fast: the
 whole analysis, ensemble included, is under a second here.
@@ -57,7 +57,7 @@ def test_the_analysed_area_is_the_buffered_selection(sheet):
 
 
 def test_the_sheet_gives_a_catchment_near_the_surveys(sheet):
-    """docs/VALIDATION.md: the survey's site 1 is 66.3 ha; the map path's is ~87 ha."""
+    """The survey's site 1 is 66.3 ha; the map path's is ~87 ha."""
     area = sheet["recommended_site"]["catchment"]["area_ha"]
     assert 40 <= area <= 150
 

@@ -1,7 +1,7 @@
 """The shape of the answer, and the rounding that makes it readable.
 
 Two jobs. The first is documentation: these models are what FastAPI renders at `/docs`,
-so a grader can see the whole contract without running anything, and every field carries
+so a reader can see the whole contract without running anything, and every field carries
 the sentence that says what it means. The second is translation, because the core speaks
 in numpy arrays, masks and dataclasses, and none of that crosses a JSON boundary.
 
@@ -446,7 +446,7 @@ class HealthResponse(BaseModel):
 
     Served here because the demo page has no other way to know. A page that ships with
     the cross-check switched on, against a host with `allow_ensemble=false`, sends
-    `ensemble=true` on every run, and the first upload a grader tries comes back a 422.
+    `ensemble=true` on every run, and the first upload a user tries comes back a 422.
     The switch has to follow the host, so the host has to say."""
 
     ensemble_default: bool

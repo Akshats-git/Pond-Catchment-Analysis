@@ -2,7 +2,7 @@
 
 The provided sample exercises exactly one path through the elevation cascade
 (`placemark_name`, 2D LineStrings). These generators cover the rest, so a change to the
-parser that quietly breaks 3D KML or Polygon rings fails a test instead of a grader's
+parser that quietly breaks 3D KML or Polygon rings fails a test instead of a user's
 upload.
 
 Everything is generated, not committed: the fixtures stay readable and diffable, and the
@@ -181,7 +181,7 @@ def spaced_coordinates() -> bytes:
 
 def with_labels_folder() -> bytes:
     """A `labels` folder of duplicate Point placemarks, as the provided sample has.
-    They must be ignored as geometry and used only as a consistency check (PLAN §11.1)."""
+    They must be ignored as geometry and used only as a consistency check."""
     lines = _body_of(placemark_name())
     labels = "<Folder><name>labels</name>" + "".join(
         f"<Placemark><name>{lv:g}</name><Point><coordinates>{LON0},{LAT0}</coordinates>"

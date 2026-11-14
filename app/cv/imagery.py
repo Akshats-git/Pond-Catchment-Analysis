@@ -1,4 +1,4 @@
-"""Satellite imagery, read for what the terrain cannot say (HLD FR-3 and §6.8).
+"""Satellite imagery, read for what the terrain cannot say.
 
 The DEM says where water collects. It cannot say whether that ground is already a pond,
 a house, or a grove, and no amount of elevation data will tell it. This module reads the

@@ -1,4 +1,4 @@
-"""Phase 6. Catchment-first pond siting.
+"""Catchment-first pond siting.
 
 Two kinds of evidence here. On synthetic surfaces the right answer is derivable by hand:
 a symmetric valley has exactly one buildable channel, and the best site on it is the
@@ -7,8 +7,8 @@ cell rather than plausibility-checked.
 
 On the real sheet the tests are about the two mistakes this phase exists to avoid. Both
 are reproduced rather than asserted: that percentile-ranked accumulation would put a
-sub-threshold hollow in the top 2% (PLAN §11.6), and that square-window suppression
-returns five nested points on one stream (PLAN §11.7). A test that only checks the right
+sub-threshold hollow in the top 2%, and that square-window suppression
+returns five nested points on one stream. A test that only checks the right
 answer would still pass after somebody reintroduced either.
 """
 
@@ -36,7 +36,7 @@ SAMPLE = "data/contours_1m.kml"
 # The five sites the sample sheet returns on the 5 m ensemble grid, as
 # (area_ha, ensemble_mean_ha, ensemble_std_ha, confidence).
 #
-# These replaced the table in PLAN §3. That table was produced before the watercourse
+# These replaced the table in That table was produced before the watercourse
 # rule existed, so its first site was the Shivnath itself: 395 ha of a 831 ha sheet,
 # outlet in the middle of the river. Every entry below stands clear of the river, which
 # is the whole reason the numbers moved.
@@ -247,7 +247,7 @@ def test_the_score_describes_the_cell_that_was_chosen():
 def test_a_depression_is_measured_to_its_spill_point():
     """A hollow gouged 2 m into the channel holds water to the level it spills at, not to
     the level it was dug from: the cell below it is already 0.1 m lower, so the depression
-    is 1.9 m deep. That is the depth Phase 7's natural storage follows from."""
+    is 1.9 m deep. That is the depth natural storage follows from."""
     dem = valley()
     z = dem.z.copy()
     z[20, 20] -= 2.0
@@ -279,7 +279,7 @@ def test_terrain_too_steep_to_dam_is_an_explicit_error():
 # The two pitfalls, reproduced on the real sheet
 # --------------------------------------------------------------------------- #
 def test_the_stream_threshold_is_half_a_percent_of_the_mapped_area(selector):
-    """Derived from the input, not hard-coded (PLAN §9)."""
+    """Derived from the input, not hard-coded."""
     assert selector.stream_threshold_m2 == pytest.approx(
         selector.mapped_area_m2 * settings.siting.stream_threshold_fraction
     )
@@ -287,7 +287,7 @@ def test_the_stream_threshold_is_half_a_percent_of_the_mapped_area(selector):
 
 
 def test_percentile_ranked_accumulation_would_be_degenerate(selector):
-    """PLAN §11.6, reproduced rather than asserted.
+    """reproduced rather than asserted.
 
     Flow accumulation is so skewed that the 98th percentile of it is a hollow draining
     under half the stream threshold. Ranking on percentiles scores such a hollow
@@ -301,7 +301,7 @@ def test_percentile_ranked_accumulation_would_be_degenerate(selector):
 
 
 def test_square_window_suppression_returns_one_stream_five_times(flow):
-    """PLAN §11.7. With catchment suppression off, the selector reproduces the failure
+    """With catchment suppression off, the selector reproduces the failure
     that motivated it: five nested points strung along the main valley."""
     windowed = PondSiteSelector(
         flow, config=replace(settings.siting, suppression_removes_catchment=False)
@@ -498,6 +498,6 @@ def selector(ensemble):
 
 @pytest.fixture(scope="module")
 def sites(selector):
-    """The five sites of PLAN §3, delineated on the 5 m grid and cross-checked on the
+    """The five sites of delineated on the 5 m grid and cross-checked on the
     2.5 m and 3.5 m ones."""
     return selector.select(5).sites

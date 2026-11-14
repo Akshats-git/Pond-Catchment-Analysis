@@ -1,13 +1,13 @@
 """Choosing where the pond goes, catchment first.
 
 A pond is only as good as the water that reaches it, so the search starts from the
-drainage network rather than from the shape of the ground (PLAN §2, "Siting"):
+drainage network rather than from the shape of the ground:
 
 1. **Stream network.** A cell is on a stream when at least 0.5% of the mapped area
    drains through it, which is 4.2 ha on the sample sheet. The threshold is absolute and
    derived from the input, never a percentile of flow accumulation: accumulation is so
    skewed that percentile ranking scored 0.7 ha hollows at 0.98 alongside a 320 ha
-   valley (PLAN §11.6).
+   valley.
 2. **Buildable ground.** Local slope under 3%, because steeper ground needs an
    embankment nobody will pay for, and at least 30 m inside the edge of the data, so
    neither the pond nor its catchment sits half off the map.
@@ -20,7 +20,7 @@ drainage network rather than from the shape of the ground (PLAN §2, "Siting"):
    collects.
 5. **Suppress the whole catchment of each pick.** Not a square window. A square window
    returned five points strung along one stream at 391, 361, 215, 202 and 179 ha, every one
-   of them nested inside the first (PLAN §11.7). Removing the entire upstream mask makes
+   of them nested inside the first. Removing the entire upstream mask makes
    the alternatives independent sub-basins, which is the only way a list of five sites
    means five choices.
 
@@ -115,7 +115,7 @@ class SiteScore:
     """How deep the natural hollow at this cell is: filled elevation minus surveyed.
 
     Zero on a channel, which is where catchment-first siting puts most sites. Those
-    ponds are excavated, and Phase 7 computes their capacity from the target depth
+    ponds are excavated, and the runoff step computes their capacity from the target depth
     instead. Quantised to the contour interval, so read it as "about a metre", not as a
     survey.
     """
@@ -262,7 +262,7 @@ class PondSiteSelector:
         return self.flow.accumulation * self.dem.row_cell_areas[:, None]
 
     def stream_mask(self) -> np.ndarray:
-        """Cells carrying at least the threshold area (PLAN §2 Siting step 1)."""
+        """Cells carrying at least the threshold area."""
         return self.dem.valid & (self.upstream_area() >= self.stream_threshold_m2)
 
     def distance_to_edge_m(self) -> np.ndarray:
@@ -384,7 +384,7 @@ class PondSiteSelector:
 
         Terrain says where water collects. It cannot say whether that spot is a house, a
         road, or a field somebody owns, and no amount of contour data will tell it. This
-        is where that answer arrives from outside: Phase 3's land-availability service
+        is where that answer arrives from outside: land-availability service
         hands in a grid of ground to leave alone, and the pond is sited around it.
 
         All ground when nothing was handed in, so the rule costs nothing when unused.
@@ -407,8 +407,7 @@ class PondSiteSelector:
     def relative_elevation(self) -> np.ndarray:
         """(ny, nx) elevation of each cell minus the local mean around it.
 
-        A NaN-aware box mean, computed the same normalised way as the DEM's Gaussian
-        (PLAN §11.2): sum the valid elevations, divide by the count of valid cells. A
+        A NaN-aware box mean, computed the same normalised way as the DEM's Gaussian: sum the valid elevations, divide by the count of valid cells. A
         plain `uniform_filter` over an array with NaN in it returns NaN for every cell
         within a window of the map edge, which is exactly the ground the sites sit near.
         """
@@ -508,7 +507,7 @@ class PondSiteSelector:
     def site_at(self, lon: float, lat: float, *, rank: int = 1) -> PondSite:
         """Score one caller-supplied pour point, bypassing the ranking entirely.
 
-        Phase 9 lets a planner name a place they have already chosen. The point still
+        The API lets a planner name a place they have already chosen. The point still
         snaps to the routed channel, because a catchment traced from a cell beside the
         stream is the hillside and not the basin. The site reports how far it moved,
         so the answer never silently describes somewhere else.
@@ -525,7 +524,7 @@ class PondSiteSelector:
 
         Normally the pick's entire upstream catchment. With
         `suppression_removes_catchment` off it is a square window instead. That is the
-        rejected alternative, kept so PLAN §11.7 can be re-run rather than merely
+        rejected alternative, kept so it can be re-run rather than merely
         asserted: on the sample it returns five nested points on a single stream.
         """
         if self.config.suppression_removes_catchment:

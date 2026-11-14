@@ -1,18 +1,18 @@
 """Where the ground comes from when nobody uploaded a contour sheet.
 
-Phase 3 lets a user draw an area on the map instead of uploading a survey. Something has
+A user can draw an area on the map instead of uploading a survey. Something has
 to supply the heights, and this module is that something. It mirrors `rainfall.py`: one
 interface, a keyless primary source, an opt-in alternate, and a cache in front so the same
 request never pays twice.
 
 **The primary source is the AWS terrain-tile bucket in terrarium encoding.** Free, keyless,
-reachable from the lab containers, and it answers in PNG tiles that Pillow already reads.
+reachable from small containers, and it answers in PNG tiles that Pillow already reads.
 Each pixel is a height:
 
     elevation = (R * 256 + G + B / 256) - 32768
 
 The `B / 256` term is not optional. Dropping it quantises every tile to whole metres and
-flattens exactly the gentle slopes that decide where water goes (PLAN3 §11.1).
+flattens exactly the gentle slopes that decide where water goes.
 
 **Tiles are immutable**, so the cache never expires anything. It is layered: decoded tiles
 in memory, then a read-only seed directory committed with the repository for the demo
@@ -100,7 +100,7 @@ def tile_resolution_m(zoom: int, lat: float) -> float:
 
     `156543.034 * cos(lat) / 2^z`. The cosine is the point: the equatorial figure
     overstates the ground resolution by 7% at 21 N, and every area downstream would
-    inherit the error (PLAN3 §11.2).
+    inherit the error.
     """
     return EARTH_CIRCUMFERENCE_M * math.cos(math.radians(lat)) / (TILE_SIZE * 2 ** zoom)
 
@@ -282,7 +282,7 @@ class TileProvider(ElevationProvider):
         """Every tile covering `bbox` at `zoom`, pasted together.
 
         Clipping happens later, by sampling at the DEM's own cell centres. Never by
-        rounding tile edges to the selection, which would move it (PLAN3 §11.3).
+        rounding tile edges to the selection, which would move it.
         """
         cfg = self.config
         x0, y0, x1, y1 = tile_range(bbox, zoom)
@@ -379,7 +379,7 @@ class TerrariumProvider(TileProvider):
                     return None
             except (urllib.error.URLError, OSError, ValueError):
                 pass
-            # The lab uplink resets intermittently; a short backoff clears most of them.
+            # Uplinks reset intermittently; a short backoff clears most of them.
             time.sleep(0.25 * (attempt + 1))
         return None
 

@@ -12,4 +12,3 @@ deploy
 *.pdf
 *.npy
 server.log
-.env.role

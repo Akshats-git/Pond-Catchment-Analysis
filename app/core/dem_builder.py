@@ -1,7 +1,6 @@
 """Contour lines -> a square metric grid of elevations.
 
-Flow algorithms need a raster, so the gaps between contour lines have to be filled in
-(PLAN §2 Step 2). Two things here are not obvious and both matter more than the
+Flow algorithms need a raster, so the gaps between contour lines have to be filled in. Two things here are not obvious and both matter more than the
 interpolation itself.
 
 **The resolution is derived, not chosen.** A grid finer than the contours cannot invent
@@ -15,14 +14,14 @@ apart fill an area `A = L * w`, so
 Four cells across the typical gap resolves the interpolated slope without pretending to
 know more than the source does.
 
-**Interpolating between contours builds a staircase, not a hillside** (PLAN §2 Step 3).
+**Interpolating between contours builds a staircase, not a hillside**.
 Linear interpolation makes the ground between two contour lines a flat band, and on a
 flat band D8 has no downhill direction to pick, so water runs along the step instead of
 down it. In the analytic validation this cost up to 12.79% of the catchment area. A
 Gaussian of sigma = spacing / 8 turns the staircase back into a slope, moving the surface
 by less than one contour interval.
 
-The smoothing must be NaN-aware in the *normalised* form (PLAN §11.2): fill invalid cells
+The smoothing must be NaN-aware in the *normalised* form: fill invalid cells
 with zero, smooth, and divide by the smoothed validity mask. The obvious alternative is
 to fill with the mean and divide by the valid-cell weight, and it inflated cells near the data
 edge into a 357 m peak on a map whose true maximum is 298 m.
@@ -62,7 +61,7 @@ def row_cell_areas(
 ) -> np.ndarray:
     """(ny,) true ground area of one cell in each grid row, in m^2.
 
-    `res^2 * cos(lat) / cos(lat0)`, which is the latitude weighting of PLAN §2 Step 6. It is a
+    `res^2 * cos(lat) / cos(lat0)`, which is the latitude weighting of Step 6. It is a
     per-row quantity because the correction depends only on latitude. Free-standing
     rather than a method so the mapped area can be totalled while the DEM is still being
     assembled.
@@ -94,8 +93,8 @@ class DEMMetadata:
 
     mapped_area_m2: float
     """Sum of the true ground areas of the valid cells. This is the number every
-    downstream area is measured against, including the stream threshold and the Phase 5
-    mass balance, so it has to come from the same cells the flow router will walk."""
+    downstream area is measured against, including the stream threshold and the mass
+    balance, so it has to come from the same cells the flow router will walk."""
 
     nodata_fraction: float
     elevation_range: tuple[float, float]
@@ -136,8 +135,8 @@ class DEM:
     """(ny, nx) bool. True where `z` is NaN."""
 
     raw_z: np.ndarray
-    """The unsmoothed interpolation, kept so the smoothing can be audited and so Phase 5
-    can run the pipeline with smoothing off and show that it is worse."""
+    """The unsmoothed interpolation, kept so the smoothing can be audited and so the
+    validation can run the pipeline with smoothing off and show that it is worse."""
 
     resolution_m: float
     origin_xy: tuple[float, float]
@@ -166,7 +165,7 @@ class DEM:
 
         The division stays *inside* `round`. Rounding first and dividing after returns a
         neighbouring cell, and a catchment delineated from the wrong cell looks perfectly
-        plausible. It is simply somebody else's basin (PLAN §11.8).
+        plausible. It is simply somebody else's basin.
         """
         x0, y0 = self.origin_xy
         return (int(round((y - y0) / self.resolution_m)),
@@ -242,8 +241,8 @@ class ContourSurface:
     """A triangulated contour set that can be sampled onto a grid at any resolution.
 
     The Delaunay triangulation of 159,113 vertices costs about a second and does not
-    depend on the grid, so it is built once and reused. Phase 4's resolution ensemble
-    samples the same surface three times (PLAN §3 Test C); rebuilding the triangulation
+    depend on the grid, so it is built once and reused. The resolution ensemble
+    samples the same surface three times; rebuilding the triangulation
     for each would triple the cost of every request for no benefit.
     """
 
@@ -337,7 +336,7 @@ class ContourSurface:
                 )
 
         # Memory ceiling. Coarsen rather than fail: a usable coarse answer with a warning
-        # beats a 500 on a large sheet (PLAN Phase 11).
+        # beats a 500 on a large sheet.
         ny, nx = self.grid_shape(resolution)
         if ny * nx > cfg.max_grid_cells:
             original = resolution
@@ -373,7 +372,7 @@ class ContourSurface:
     ) -> DEM:
         """Interpolate the contours onto a grid.
 
-        `smooth=False` exists for the Phase 5 validation, which has to show that the
+        `smooth=False` exists for the validation, which has to show that the
         smoothing earns its place rather than merely asserting it.
         """
         cfg = self.config
@@ -467,7 +466,7 @@ class ContourSurface:
 
     @staticmethod
     def _smooth(raw: np.ndarray, nodata: np.ndarray, sigma_cells: float) -> np.ndarray:
-        """Normalised, NaN-aware Gaussian (PLAN §11.2).
+        """Normalised, NaN-aware Gaussian.
 
         Smoothing a grid with NaNs in it poisons everything within sigma of the hole. The
         fix is to smooth the data and the validity mask separately and divide:

@@ -1,4 +1,4 @@
-"""Phase 7. Event-based SCS-CN runoff, stage-storage and time of concentration.
+"""Event-based SCS-CN runoff, stage-storage and time of concentration.
 
 The runoff tests exist because of one mistake: SCS-CN is an event model, and a year of
 rain put through it as a single storm returns a 92% runoff coefficient. Both aggregations
@@ -103,10 +103,10 @@ def test_runoff_volume_is_a_depth_over_an_area():
 
 
 # --------------------------------------------------------------------------- #
-# The event-model mistake (PLAN §4)
+# The event-model mistake
 # --------------------------------------------------------------------------- #
 def test_the_annual_total_as_one_storm_is_the_error_it_is_documented_as(series):
-    """PLAN §4's table, reproduced: 1200 mm as a single event gives 1104 mm of runoff and
+    """'s table, reproduced: 1200 mm as a single event gives 1104 mm of runoff and
     a 92% coefficient. A figure no catchment produces."""
     result = scs_cn_runoff(series, CFG.default_curve_number)
     assert result.single_event_depth_mm == pytest.approx(1104.0, abs=1.0)
@@ -407,7 +407,7 @@ def test_the_frustum_cross_check_underestimates_real_ground(balance):
 
 
 def test_a_channel_site_has_no_natural_storage_and_says_so(balance):
-    """PLAN §11: a site on a channel stores nothing by itself. The capacity comes from the
+    """: a site on a channel stores nothing by itself. The capacity comes from the
     target depth against the terrain, never from the depression depth, which is zero."""
     storage = balance.storage
     assert storage.natural_storage_m3 < CFG.natural_storage_floor_m3

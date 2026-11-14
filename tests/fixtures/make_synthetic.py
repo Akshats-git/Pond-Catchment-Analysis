@@ -54,7 +54,7 @@ class SyntheticValley:
     interval_m: float = 1.0
     """Contour interval. With |grad z| = 0.051 this puts the contour lines 19.6 m apart,
     so the pipeline derives a 4.9 m grid and a 2.45 m smoothing sigma. The 5 m / 2.5 m
-    regime PLAN §3 Test A reports."""
+    regime Test A reports."""
 
     vertex_spacing_m: float = 5.0
     """How finely each contour line is sampled. The lines are straight, so this only has

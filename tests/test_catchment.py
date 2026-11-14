@@ -1,4 +1,4 @@
-"""Phase 4. Catchment delineation, edge diagnostics and the resolution ensemble.
+"""Catchment delineation, edge diagnostics and the resolution ensemble.
 
 The delineation itself is a tree traversal and is easy to check exactly on a synthetic
 surface. What needs care is everything around it: the edge-contact measure, which was
@@ -28,7 +28,7 @@ from tests.test_terrain import plane_east, synthetic_dem
 
 SAMPLE = "data/contours_1m.kml"
 
-# PLAN §3, "Results on the provided contour map".
+# "Results on the provided contour map".
 # (lon, lat, area_ha, edge_contact_pct, relief_m, ensemble_mean_ha, ensemble_std_ha)
 PUBLISHED_SITES = [
     (81.286465, 21.240094, 395.4, 1.3, 27.0, 423.5, 17.6),
@@ -127,7 +127,7 @@ def test_accumulation_at_the_outlet_equals_the_cell_count(delineator):
 
 
 # --------------------------------------------------------------------------- #
-# Edge contact. PLAN §11.3
+# Edge contact. 
 # --------------------------------------------------------------------------- #
 def test_an_interior_catchment_has_no_edge_contact():
     mask = np.zeros((10, 10), dtype=bool)
@@ -141,7 +141,7 @@ def test_a_catchment_filling_the_grid_is_all_edge():
 
 
 def test_edge_contact_counts_nodata_not_just_the_border():
-    """The bug PLAN §11.3 names. This catchment touches no border at all, but half its
+    """The bug names. This catchment touches no border at all, but half its
     perimeter faces a no-data hole. Ground the contours never described. Testing only
     the array border would report it complete."""
     nodata = np.zeros((12, 12), dtype=bool)
@@ -181,7 +181,7 @@ def test_lower_bound_flag_follows_the_threshold(delineator):
 
 
 # --------------------------------------------------------------------------- #
-# Snapping. PLAN §11.4, §11.9
+# Snapping. 
 # --------------------------------------------------------------------------- #
 def test_snap_radius_scales_with_the_contour_spacing(delineator):
     """Not a fixed 30 m: the routed channel moves about 90 m between the ensemble's
@@ -211,7 +211,7 @@ def test_snap_distance_is_zero_when_already_on_the_peak(delineator):
 
 
 def test_snap_windows_are_clamped_at_every_edge(delineator):
-    """PLAN §11.9. An unclamped slice turns a negative index into a wrap-around and
+    """An unclamped slice turns a negative index into a wrap-around and
     argmax then returns a cell on the opposite side of the map. Every corner and edge
     must delineate without raising and without teleporting."""
     dem = delineator.dem
@@ -277,7 +277,7 @@ def test_flow_path_is_at_least_the_straight_line_distance(delineator):
 
 
 # --------------------------------------------------------------------------- #
-# The published results. PLAN Phase 4 acceptance
+# The published results
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("index", range(5))
 def test_published_areas_reproduce(delineator, index):
@@ -292,7 +292,7 @@ def test_published_relief_reproduces(delineator, index):
 
 
 def test_acceptance_site_one(delineator):
-    """PLAN Phase 4: site 1 -> 395.4 ha at 5 m."""
+    """site 1 -> 395.4 ha at 5 m."""
     catchment = delineator.delineate(*PUBLISHED_SITES[0][:2])
     assert catchment.area_ha == pytest.approx(395.4, rel=0.01)
     assert not catchment.is_lower_bound
@@ -300,7 +300,7 @@ def test_acceptance_site_one(delineator):
 
 
 def test_the_clipped_site_is_the_one_with_edge_contact(delineator):
-    """Site 2 is the one PLAN §3 calls "partly clipped", and it must be the one this
+    """Site 2 is the one calls "partly clipped", and it must be the one this
     measure singles out."""
     contacts = [delineator.delineate(lon, lat).edge_contact for lon, lat, *_ in PUBLISHED_SITES]
     assert contacts.index(max(contacts)) == 1
@@ -311,7 +311,7 @@ def test_the_clipped_site_is_the_one_with_edge_contact(delineator):
 
 
 # --------------------------------------------------------------------------- #
-# The ensemble. PLAN §3 Test C
+# The ensemble. Test C
 # --------------------------------------------------------------------------- #
 def test_ensemble_uses_three_grids(ensemble):
     assert ensemble.resolutions_m == (5.0, 3.5, 2.5)
@@ -327,14 +327,14 @@ def test_published_ensemble_reproduces(ensemble, index):
 
 
 def test_acceptance_site_one_ensemble(ensemble):
-    """PLAN Phase 4: 423.5 +/- 17.6 ha."""
+    """423.5 +/- 17.6 ha."""
     result = ensemble.delineate(*PUBLISHED_SITES[0][:2])
     assert result.mean_area_ha == pytest.approx(423.5, rel=0.05)
     assert result.confidence == "high"
 
 
 def test_site_four_is_rejected_as_unstable(ensemble):
-    """The whole point of the ensemble (PLAN §3). Site 4 measures 35.7 ha on one grid and
+    """The whole point of the ensemble. Site 4 measures 35.7 ha on one grid and
     under 5 ha on the other two; reported as a single number it looks like a perfectly
     good 36 ha catchment."""
     result = ensemble.delineate(*PUBLISHED_SITES[3][:2])

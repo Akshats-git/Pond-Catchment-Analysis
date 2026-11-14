@@ -1,126 +1,97 @@
 # Pond Catchment Analysis
 
-Draw a box on a map. Get back where to dig a village pond, the ground that drains into
-it, and how much water it'll hold in an average year — all overlaid on the map.
+Draw a box on a map. Get back where to dig a village pond, the land that drains into it,
+and how much water it will hold in an average year.
 
-**[Try the live demo →](https://pond-catchment-analysis-vt7g.onrender.com)**
+**[Live demo →](https://pond-catchment-analysis-vt7g.onrender.com)**
 
-![The sample area analysed from the map](docs/figures/area_result.jpg)
+![The sample area analysed on the map](assets/area_result.jpg)
 
 ## What it does
 
-- **Pick the land** — search a village, then drag a box or draw a polygon around it.
-- **Free elevation** — SRTM terrain tiles fill in the heights, no upload needed. Have a
-  surveyed contour sheet instead? Upload the KML/KMZ for the same answer at survey accuracy.
-- **Finds the pond site** — routes water downhill across the terrain, ranks locations by
-  how much drains into them, and keeps a safe distance from watercourses.
-- **Estimates the water** — ten years of real rainfall for that spot, run through the
-  SCS curve-number runoff model, turned into a fill curve for the pond.
-- **Shows the work** — catchment boundary, flow paths, contours, and (from satellite
-  imagery) existing ponds and buildable land, all on the map. Export as GeoJSON or PNG,
-  save an analysis, reopen it later.
+- **Pick any land.** Search for a village, then draw a box or a polygon around it.
+- **No upload needed.** Free SRTM elevation tiles supply the heights. You can also upload a
+  surveyed contour sheet (KML or KMZ) for a more exact answer.
+- **Finds the pond site.** It routes water downhill, ranks the spots by how much drains
+  into them, and keeps them clear of streams.
+- **Estimates the water.** It uses ten years of real rainfall and the SCS runoff model to
+  build a fill curve for the pond.
+- **Shows its work.** Catchments, flow paths, contours, existing ponds and buildable land
+  all appear on the map. You can export GeoJSON or a PNG, and save an analysis for later.
 
-A sample area near Raipur, Chhattisgarh is one click away. It resolves in about half a
-second on a laptop, and in a few seconds on the free-tier live demo.
+| Rainfall and runoff | Satellite layers |
+|---|---|
+| ![Rainfall and storage](assets/water.jpg) | ![Existing water and unavailable land](assets/layers.jpg) |
 
-| Rainfall and runoff | Imagery layers | On a phone |
-|---|---|---|
-| ![Rainfall and storage](docs/figures/water.jpg) | ![Existing water and unavailable land](docs/figures/layers.jpg) | <img src="docs/figures/phone.jpg" alt="At phone width" width="220"> |
-
-## Tech stack
-
-- **Backend:** Python 3.12, FastAPI, NumPy, SciPy, Pydantic
-- **Front end:** one HTML file, no build step
-- **Infrastructure:** Docker Compose, nginx, SQLite, deployed on Render
-- **Observability:** OpenTelemetry traces, metrics and logs into Grafana, Tempo and Loki
-- **Data:** SRTM terrain tiles, Open-Meteo ERA5 rainfall, Esri satellite imagery
-
-## Running it locally
+## Try it
 
 ```bash
 docker compose up -d --build
-# open http://localhost:5229 and press "Try the sample area"
 ```
 
-or hit the API directly:
+Open <http://localhost:8080> and press **Try the sample area**. Or call the API directly:
 
 ```bash
-curl -X POST http://localhost:5229/api/v1/analyzeArea -H 'Content-Type: application/json' \
+curl -X POST http://localhost:8080/api/v1/analyzeArea \
+     -H 'Content-Type: application/json' \
      -d '{"bbox": [81.2814, 21.2398, 81.3126, 21.2636]}'
 ```
 
-A single-process dev server (no Docker) and the multi-host setup are in
-[docs/INSTALL.md](docs/INSTALL.md).
+For a single process without Docker, run `pip install -r requirements.txt` and then
+`uvicorn app.main:app`. Interactive API docs are at `/docs`.
 
 ## How it works
 
-```
-browser ── frontend (nginx) ── gateway ─┬─ worker ─┐
-                                        ├─ worker ─┼── cv (imagery)
-                                        └─ worker ─┘
-          saved sites: SQLite on the gateway's volume
-```
+The pipeline has seven steps:
 
-One codebase, one Docker image. Whether a process is a gateway, a worker, or the
-imagery service is decided entirely by its environment variables. Run it with nothing
-set and it analyzes requests itself, which is what the live demo does. The gateway
-queues jobs, caches results and sends each job to the least-busy worker. Every service
-runs under a 512 MB memory cap ([load-test results](docs/SCALING.md)).
+> elevation → DEM → fill pits → D8 flow routing → pond sites → catchments → runoff and storage
 
-The analysis pipeline: elevation → DEM → pit filling → D8 flow direction and
-accumulation → stream network → ranked pond sites → catchment delineation → rainfall
-and SCS runoff → stage-storage curve. [docs/METHODOLOGY.md](docs/METHODOLOGY.md) walks
-through each step.
-
-| Path | What lives there |
-|---|---|
-| `app/core/` | The analysis: DEM building, hydrology, catchment delineation, pond siting, contouring |
-| `app/providers/` | Elevation tiles and rainfall, each behind a cached interface |
-| `app/cv/` | Satellite imagery: existing water bodies and buildable land |
-| `app/pipeline.py` | Ties it together: a contour sheet or a map area, same answer out |
-| `app/jobs.py` | Async jobs with per-stage progress, a result cache, and dispatch across workers |
-| `static/index.html` | The whole front end |
-| `tests/` | The test suite, with synthetic terrain where the right answer is known |
-| `tools/` | Load testing, the scaling matrix, survey validation, tile prewarming |
-| `deploy/` | nginx config, the Grafana dashboard, and multi-host deploy scripts |
-| `docs/` | API reference, methodology, validation and scaling results |
-
-Full endpoint reference: [docs/API.md](docs/API.md), or `/docs` on any running instance.
+The same Docker image can run as a gateway, a worker or an imagery service. Environment
+variables pick the role. With none set, one process does everything, which is how the live
+demo runs. The compose stack adds a gateway, three workers and a satellite-imagery service.
+Each is capped at 512 MB.
 
 ## How accurate is it?
 
-The free SRTM elevation was checked against a real 1 m contour survey of the same
-ground ([docs/VALIDATION.md](docs/VALIDATION.md)): the two DEMs agree to 0.26 m RMSE,
-and both recommend a pond in the same valley, 400 m apart. That is close enough to find
-the site, but it should still be surveyed before construction.
+I checked the free SRTM terrain against a real 1 m contour survey of the same ground. The
+two surfaces agree to 0.26 m RMSE. Both recommend a pond in the same valley, 400 m apart.
+That is good enough to find a site. Survey it before you build.
+
+## Built with
+
+Python 3.12, FastAPI, NumPy, SciPy and Pydantic on the backend. The front end is one HTML
+file with no build step. Docker Compose, nginx and SQLite run the stack, and it is deployed
+on Render. Data comes from SRTM terrain tiles, Open-Meteo rainfall and Esri imagery.
 
 ## Observability
 
-`docker compose up` also starts a Grafana stack that collects OpenTelemetry traces,
-metrics and logs from the gateway, the workers and the CV service. Run
-`tools/generate_load.sh`, then open <http://localhost:3000> (admin / admin).
-**Explore > Tempo** shows one trace per job, from the gateway through the worker's
-pipeline stages to the elevation and rainfall calls it makes. Telemetry is off unless
-`OTEL_EXPORTER_OTLP_ENDPOINT` is set, so the tests and the Render deploy don't send any.
+The compose stack sends OpenTelemetry traces, metrics and logs to Grafana. Run
+`tools/generate_load.sh`, then open <http://localhost:3000> (login `admin` / `admin`).
+Each job shows up as one trace, from the gateway to the worker and the elevation and
+rainfall calls it makes.
 
-| One job traced across services | Metrics dashboard |
+| One job, traced across services | Metrics dashboard |
 |---|---|
-| ![Trace](docs/figures/trace.png) | ![Grafana dashboard](docs/figures/grafana_dashboard.png) |
+| ![Trace](assets/trace.png) | ![Grafana dashboard](assets/grafana_dashboard.png) |
+
+## Project layout
+
+| Path | Contents |
+|---|---|
+| `app/core/` | DEM building, hydrology, catchments, pond siting, contours |
+| `app/providers/` | Elevation and rainfall sources, each cached |
+| `app/cv/` | Existing water and buildable land from satellite imagery |
+| `app/jobs.py` | Async jobs with progress, a result cache and worker dispatch |
+| `static/index.html` | The whole front end |
+| `tests/` | Tests on synthetic terrain with known answers |
+| `tools/` | Smoke test, load test, validation and tile prewarming |
+| `deploy/` | nginx config and the Grafana dashboard |
 
 ## Tests
 
 ```bash
-pip install -r requirements.txt
 pytest
 ```
 
-591 tests, no network required. Elevation and rainfall are stubbed with known
-answers, so a run reproduces the same result every time.
-
-## Documentation
-
-- [docs/METHODOLOGY.md](docs/METHODOLOGY.md): the hydrology and siting method, and how it was validated
-- [docs/VALIDATION.md](docs/VALIDATION.md): free SRTM elevation compared with a 1 m survey
-- [docs/SCALING.md](docs/SCALING.md): throughput and memory under load
-- [docs/API.md](docs/API.md): every endpoint, field and error code
-- [docs/INSTALL.md](docs/INSTALL.md): running it as one process, with Docker Compose, or across four hosts
+There are 591 tests. They need no network, because elevation and rainfall are stubbed
+with known answers. A full run takes about three minutes.

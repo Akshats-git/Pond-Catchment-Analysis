@@ -6,7 +6,7 @@ module.
 
 The hard problem is not the geometry. It is finding the height. KML has no
 standard place to put a contour's height, so producers put it wherever they like. The
-parser therefore resolves elevation by a **cascade** (PLAN Phase 1): four strategies are
+parser therefore resolves elevation by a **cascade**: four strategies are
 tried in order and the first one that explains almost every contour wins.
 
     1. z_coordinate    the third number of a 3D <coordinates> tuple
@@ -49,7 +49,7 @@ __all__ = [
 class ContourParseError(Exception):
     """A contour file that cannot be turned into a usable surface.
 
-    Carries the structured `(code, detail, hint)` triple the API returns (PLAN Phase 9),
+    Carries the structured `(code, detail, hint)` triple the API returns,
     so the route layer maps the code to a status without re-deriving the diagnosis.
     """
 
@@ -94,7 +94,7 @@ class ContourMetadata:
 
     label_placemark_count: int = 0
     """Point placemarks in ignored folders. The sample's `labels` folder duplicates all
-    1,355 contour elevations as points; they add no surface information (PLAN §11.1)."""
+    1,355 contour elevations as points; they add no surface information."""
 
     labels_consistent: bool | None = None
     """Whether those label heights are a subset of the contour levels. This is a free
@@ -113,7 +113,7 @@ class ContourSet:
     """Contour vertices as a flat point cloud, plus the line structure that made it.
 
     Every vertex of every contour line is a known `(lon, lat, z)`: a contour is a line of
-    constant height, so each of its points has that height (PLAN §2 Step 1). The DEM
+    constant height, so each of its points has that height. The DEM
     builder wants the flat cloud; the resolution heuristic needs total contour *length*,
     which needs the per-line grouping. Hence `line_starts`, CSR-style offsets into
     `points`.
@@ -617,7 +617,7 @@ def _assemble(
     warnings: list[str] = []
     unit_hint = sorted(units)[0] if units else None
 
-    # Feet-vs-metres: flag, never convert (PLAN Phase 1). A 5-unit interval is far more
+    # Feet-vs-metres: flag, never convert. A 5-unit interval is far more
     # likely to be 5 ft than 5 m, but guessing wrong would silently rescale the terrain.
     low, high = cfg.feet_interval_range
     if low <= interval <= high:

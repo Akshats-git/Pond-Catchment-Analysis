@@ -1,4 +1,4 @@
-"""Contour lines from a DEM (HLD FR-2).
+"""Contour lines from a DEM.
 
 The contour path starts from contour lines; the map path starts from a grid and has none.
 This draws them, so a drawn area gets the same contour overlay an uploaded sheet does, and

@@ -195,7 +195,7 @@ _TILE_LOCK = threading.Lock()
 """Shared across requests and across the threadpool's workers, so a re-render of the same
 sheet pays for the fetch once. A failure is cached too, but only for
 `tile_retry_after_s`: a tile that 404s will 404 on every retry, and re-asking is how a
-service gets itself blocked; but on the lab's link a tile that timed out once is usually
+service gets itself blocked; but on a flaky link a tile that timed out once is usually
 there a minute later, and caching that for good left permanent holes in the imagery."""
 
 

@@ -1,14 +1,14 @@
 """Central configuration.
 
 Every tunable in the service lives here as a named, documented default. Nothing in
-`app/core/` may contain a bare numeric literal that a grader would have to guess at:
+`app/core/` may contain a bare numeric literal that a reader would have to guess at:
 if a number matters, it is defined here with the reasoning that produced it.
 
 All settings are overridable from the environment with the prefix ``POND_``, e.g.::
 
     POND_DEM_RESOLUTION_DIVISOR=6 uvicorn app.main:app
 
-A note on hard-coding (PLAN §9). The three numbers that move the answer most are the
+A note on hard-coding. The three numbers that move the answer most are the
 grid resolution, the smoothing width and the stream threshold, and all three are worked
 out from the uploaded map at run time. What lives here are the ratios used to work them
 out, not the numbers that come from them.
@@ -28,7 +28,7 @@ ENV_PREFIX = "POND_"
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class ParserConfig:
-    """KML/KMZ contour parsing (PLAN Phase 1)."""
+    """KML/KMZ contour parsing."""
 
     max_upload_bytes: int = 64 * 1024 * 1024
     """Reject larger uploads with HTTP 413. The 6.7 MB sample leaves ample headroom."""
@@ -53,7 +53,7 @@ class ParserConfig:
     ignore_folder_pattern: str = r"label"
     """Folders whose name matches are skipped. The sample carries a `labels` folder of
     1,355 point placemarks repeating the contour heights, which add nothing to the
-    surface (PLAN §11.1). Point geometry is ignored either way. This just saves walking
+    surface. Point geometry is ignored either way. This just saves walking
     it."""
 
     min_contour_lines: int = 2
@@ -64,7 +64,7 @@ class ParserConfig:
 
     feet_interval_range: tuple[float, float] = (4.0, 6.0)
     """A contour interval in this range is far more likely to be 5 ft than 5 m. When it
-    matches, warn and name both readings. Never convert silently (PLAN §1)."""
+    matches, warn and name both readings. Never convert silently."""
 
 
 # --------------------------------------------------------------------------- #
@@ -72,7 +72,7 @@ class ParserConfig:
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class ProjectionConfig:
-    """Equirectangular ENU about the dataset centroid (PLAN Phase 2).
+    """Equirectangular ENU about the dataset centroid.
 
     Sub-metre accurate over the ~3 km extent of a village contour sheet, exactly
     invertible, and zero-dependency. Behind the `Projection` interface so a UTM/pyproj
@@ -91,7 +91,7 @@ class ProjectionConfig:
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class DEMConfig:
-    """Contour-interpolated DEM (PLAN §2 steps 2-3)."""
+    """Contour-interpolated DEM."""
 
     resolution_divisor: float = 4.0
     """grid resolution = mean contour spacing / this. Four cells across the typical
@@ -101,8 +101,7 @@ class DEMConfig:
 
     min_resolution_m: float = 2.0
     max_resolution_m: float = 20.0
-    """Clamp on the derived resolution. The lower bound caps memory (PLAN Phase 11:
-    a request must not exhaust 512 MB); the upper bound keeps flow routing meaningful."""
+    """Clamp on the derived resolution. The lower bound caps memory; the upper bound keeps flow routing meaningful."""
 
     max_grid_cells: int = 12_000_000
     """Hard server-side ceiling. If the derived or requested resolution would exceed it,
@@ -112,7 +111,7 @@ class DEMConfig:
     """Gaussian sigma = mean contour spacing / this (1.56 m on the sample).
 
     Interpolating between contour lines produces flat stair-step bands, not a hillside.
-    Without this smoothing the analytic validation (PLAN §3 Test A) errs by up to
+    Without this smoothing the analytic validation errs by up to
     -12.79%. With it, 0.00%. The surface moves by at most 0.9 m, which is less than one
     contour interval, so the smoothing takes out the artefact and leaves the terrain."""
 
@@ -122,7 +121,7 @@ class DEMConfig:
     nodata_weight_floor: float = 1e-6
     """Denominator floor for the NaN-aware Gaussian.
 
-    The normalised form is mandatory (PLAN §11.2): fill invalid cells with 0.0, smooth,
+    The normalised form is mandatory: fill invalid cells with 0.0, smooth,
     then divide by the smoothed validity mask. Filling with the mean and dividing by a
     valid-cell weight inflated edge cells to a 357 m peak on a map topping out at 298 m."""
 
@@ -132,7 +131,7 @@ class DEMConfig:
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class TerrainConfig:
-    """Priority-flood fill and D8 routing (PLAN §2 steps 4-5)."""
+    """Priority-flood fill and D8 routing."""
 
     fill_epsilon_m: float = 1e-4
     """Increment added across flats during priority-flood so water keeps moving
@@ -149,17 +148,17 @@ class TerrainConfig:
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class CatchmentConfig:
-    """Upstream delineation, confidence and edge diagnostics (PLAN Phase 4)."""
+    """Upstream delineation, confidence and edge diagnostics."""
 
     snap_radius_spacing_multiple: float = 3.0
     """Outlet snap search radius = this x mean contour spacing (~37 m on the sample).
 
     Must scale with the data, not be a fixed 30 m: the routed channel shifts by ~90 m
-    between grid resolutions, so a fixed radius snaps to the wrong stream (PLAN §11.4)."""
+    between grid resolutions, so a fixed radius snaps to the wrong stream."""
 
     ensemble_resolutions_m: tuple[float, ...] = (5.0, 3.5, 2.5)
     """Delineate every site on three independent grids. Agreement across them is what
-    turns a bare area into an area with an error bar (PLAN §3 Test C)."""
+    turns a bare area into an area with an error bar."""
 
     confidence_high_cv: float = 0.10
     confidence_medium_cv: float = 0.30
@@ -173,7 +172,7 @@ class CatchmentConfig:
     map."""
 
     mass_balance_tolerance: float = 1e-4
-    """Phase 5 Test B: the sum of all basin areas must equal the mapped area to within
+    """Mass balance: the sum of all basin areas must equal the mapped area to within
     this relative tolerance. Measured on the sample: 0.000000%."""
 
 
@@ -182,7 +181,7 @@ class CatchmentConfig:
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class SitingConfig:
-    """Catchment-first site selection (PLAN §2 'Siting', Phase 6)."""
+    """Catchment-first site selection."""
 
     stream_threshold_fraction: float = 0.005
     """A cell is 'on a stream' when its upstream area is at least this fraction of the
@@ -190,7 +189,7 @@ class SitingConfig:
 
     An absolute threshold worked out from the data, never a percentile rank of flow.
     Accumulation is so skewed that percentile ranking scored 0.7 ha hollows at 0.98
-    alongside a 320 ha valley (PLAN §11.6)."""
+    alongside a 320 ha valley."""
 
     max_slope_fraction: float = 0.03
     """Buildable ground: local slope below 3%. Steeper needs an uneconomic embankment."""
@@ -234,7 +233,7 @@ class SitingConfig:
     suppression_removes_catchment: bool = True
     """After each pick, remove that site's entire upstream catchment from the candidate
     pool, so alternatives are independent sub-basins. Square-window suppression returned
-    five nested points on one stream (391/361/215/202/179 ha) (PLAN §11.7)."""
+    five nested points on one stream (391/361/215/202/179 ha)."""
 
 
 # --------------------------------------------------------------------------- #
@@ -242,7 +241,7 @@ class SitingConfig:
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class HydrologyConfig:
-    """Event-based SCS-CN runoff and stage-storage (PLAN §4, Phase 7)."""
+    """Event-based SCS-CN runoff and stage-storage."""
 
     default_curve_number: float = 75.0
     """SCS curve number. 75 ~ cultivated land with row crops on hydrologic soil group B,
@@ -270,8 +269,7 @@ class HydrologyConfig:
 
     expected_runoff_coefficient_range: tuple[float, float] = (0.05, 0.25)
     """Sanity band for this terrain. SCS-CN must be applied per rain day and summed;
-    applied to the annual total as a single event it returns 92%, a ~6x overestimate
-    (PLAN §4).
+    applied to the annual total as a single event it returns 92%, a ~6x overestimate.
 
     The band is wide because the answer depends on how the year's rain is split across
     days, and that differs between sources. The seeded climatology spreads 1,200 mm over
@@ -289,8 +287,7 @@ class HydrologyConfig:
     natural_storage_floor_m3: float = 50.0
     """Below this, a site is treated as having no natural depression and its capacity is
     dug out or bunded instead. Two cells of a 5 m grid holding 1 m of water is 50 m^3, and
-    less than that is the priority-flood epsilon and interpolation noise, not a pond
-    (PLAN §11 / Phase 7)."""
+    less than that is the priority-flood epsilon and interpolation noise, not a pond."""
 
     spill_area_jump_factor: float = 3.0
     """A step of the stage-storage curve that multiplies the water surface by more than
@@ -311,7 +308,7 @@ class HydrologyConfig:
 
     default_target_depth_m: float = 3.0
     """Excavated pond depth. Sites on a channel have no natural depression storage, so
-    capacity is computed from this depth against the local terrain (PLAN §11 / Phase 7)."""
+    capacity is computed from this depth against the local terrain."""
 
     stage_storage_steps: int = 12
     """Number of (depth, area, volume) triples in the reported stage-storage curve."""
@@ -362,7 +359,7 @@ class RainfallConfig:
     abstraction anyway, so carrying 250 dry days a year would only pad the array."""
 
     cache_size: int = 64
-    """Locations kept in memory. A grader re-running the same sheet should pay for the
+    """Locations kept in memory. Re-running the same sheet should pay for the
     fetch once, and a contour sheet is one location."""
 
     coordinate_precision: int = 2
@@ -371,15 +368,15 @@ class RainfallConfig:
 
 
 # --------------------------------------------------------------------------- #
-# Elevation tiles (Phase 3)
+# Elevation tiles
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class ElevationConfig:
     """Where the DEM comes from when the user draws an area instead of uploading a sheet.
 
     The primary source is the AWS terrain-tile bucket in terrarium encoding: free, keyless,
-    reachable from the lab containers, and over the provided survey sheet it reads
-    266-299 m against the survey's 267-298 m (PLAN3 §3.1). Nothing here needs GDAL.
+    reachable from a small container, and over the sample survey sheet it reads
+    266-299 m against the survey's 267-298 m. Nothing here needs GDAL.
     """
 
     provider: str = "terrarium"
@@ -409,13 +406,13 @@ class ElevationConfig:
 
     cell_budget: int = 1_000_000
     """`POND_ELEVATION_CELL_BUDGET`. The grid grows coarser rather than past this many
-    cells. The Phase 2 sheet was 886,000 cells and peaked near 300 MB, so a million keeps
+    cells. The sample survey sheet was 886,000 cells and peaked near 300 MB, so a million keeps
     any selection inside the envelope already known to fit a 512 MB container."""
 
     aoi_buffer: float = 0.25
     """`POND_ELEVATION_AOI_BUFFER`. The DEM is fetched for the selection grown by this
     fraction of its span on every side, so catchments that cross the drawn line are counted
-    in full. Water does not respect a rectangle somebody drew (PLAN3 §5.3)."""
+    in full. Water does not respect a rectangle somebody drew."""
 
     min_buffer_m: float = 300.0
     """The buffer is never thinner than this, so a small field still sees the slope above it."""
@@ -432,7 +429,7 @@ class ElevationConfig:
     smoothing_sigma_m: float = 8.0
     """Gaussian sigma applied to the resampled tiles. SRTM heights come in whole metres, so
     gentle ground is a staircase of flat terraces, the same failure the contour path's
-    smoothing exists for. Chosen against the survey (docs/VALIDATION.md): 8 m leaves the
+    smoothing exists for. Chosen against the survey: 8 m leaves the
     DEM as close to the survey as no smoothing does (RMSE 0.26 m) while turning the
     ensemble from `low` confidence (61 +/- 36 ha) into `medium` (80 +/- 11 ha); 15 m and
     more start to move the divides, and the ensemble grids snap onto the trunk channel."""
@@ -453,7 +450,7 @@ class ElevationConfig:
 
     seed_dir: str = "data/tiles"
     """Read-only tiles committed with the repository for the demo region, so the demo
-    works with the network down (PLAN3 §10)."""
+    works with the network down."""
 
     ensemble_max_cells: int = 250_000
     """The raster path can afford the ensemble that the contour path cannot on 512 MB:
@@ -468,7 +465,7 @@ class ElevationConfig:
 
 
 # --------------------------------------------------------------------------- #
-# Async jobs, dispatch and caching (Phase 3)
+# Async jobs, dispatch and caching
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class JobsConfig:
@@ -493,7 +490,7 @@ class JobsConfig:
     process. Set, this process becomes the gateway and dispatches to those workers."""
 
     strategy: str = "least_busy"
-    """`least_busy` or `round_robin`. Measured against each other in docs/SCALING.md."""
+    """`least_busy` or `round_robin`."""
 
     worker_slots: int = 1
     """Analyses each worker runs at once. One, for the same reason as
@@ -516,23 +513,23 @@ class PlacesConfig:
     max_results: int = 8
     user_agent: str = "PondCatchmentAnalysis/2.0 (+village pond siting; research use)"
     """Nominatim's usage policy requires an identifying User-Agent and at most one request
-    a second. The cache plus `min_interval_s` keep a lab full of graders inside it."""
+    a second. The cache plus `min_interval_s` keep a busy demo inside it."""
     min_interval_s: float = 1.0
     country_codes: str = ""
     """Optional `in` to keep results inside India. Empty searches everywhere."""
     retry_delay_s: float = 1.5
-    """The lab's outbound link resets for a few seconds at a time. One retry after this
+    """An outbound link can reset for a few seconds at a time. One retry after this
     pause usually lands on the other side of that; failing the whole search on the first
     hiccup was turning a blip into "search is unavailable"."""
 
 
 @dataclass(frozen=True)
 class CVConfig:
-    """Satellite-imagery analysis: existing water and land availability (Phase 23)."""
+    """Satellite-imagery analysis: existing water and land availability."""
 
     service_url: str = ""
     """`POND_CV_SERVICE_URL`. Empty runs the CV in-process; set, it is called over HTTP,
-    which is the HLD's separate container 3."""
+    which runs it as a separate container."""
 
     imagery_zoom: int = 16
     """About 2.2 m pixels at 21 N: a village pond is tens of pixels across."""
@@ -567,7 +564,7 @@ class CVConfig:
 
 @dataclass(frozen=True)
 class StoreConfig:
-    """Saved analyses (FR-9)."""
+    """Saved analyses."""
 
     path: str = ".data/ponds.sqlite3"
     """SQLite file, relative to the repo root unless absolute. One file, no server, and
@@ -582,7 +579,7 @@ class StoreConfig:
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class GeoJSONConfig:
-    """Vector output (PLAN Phase 8)."""
+    """Vector output."""
 
     simplify_tolerance_cells: float = 0.75
     """Douglas-Peucker tolerance, in grid cells. Below one cell the simplification
@@ -691,7 +688,7 @@ class RenderConfig:
     under two seconds without looking like a scraper to the tile provider."""
 
     tile_cache_size: int = 512
-    """Tiles kept in memory across requests. A grader re-rendering the same sheet at the
+    """Tiles kept in memory across requests. Re-rendering the same sheet at the
     same size pays for the fetch once. 512 tiles of 256px PNG is roughly 30 MB."""
 
     tile_retry_after_s: float = 300.0
@@ -710,7 +707,7 @@ class RenderConfig:
 
     user_agent: str = "PondCatchmentAnalysis/1.0 (+contour catchment siting service)"
     """Tile providers ask for identification. An honest one is also what keeps a shared
-    lab IP from being mistaken for a scraper."""
+    IP from being mistaken for a scraper."""
 
     satellite_url: str = (
         "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/"
@@ -733,7 +730,7 @@ class RenderConfig:
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class APIConfig:
-    """Service surface (PLAN Phase 9)."""
+    """Service surface."""
 
     title: str = "Pond Catchment Analysis API"
     version: str = "2.0.0"
@@ -741,8 +738,8 @@ class APIConfig:
     docs_url: str = "/docs"
 
     cors_allow_origins: tuple[str, ...] = ("*",)
-    """The demo page is served from the same origin, but an open CORS policy lets a
-    grader call the API from anywhere."""
+    """The demo page is served from the same origin, but an open CORS policy lets any
+    client call the API from anywhere."""
 
     default_ensemble: bool = True
     """Run the 3-grid resolution ensemble by default (~12 s vs ~4 s without). The error

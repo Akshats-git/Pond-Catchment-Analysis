@@ -61,7 +61,7 @@ def test_an_unreachable_search_says_so(monkeypatch):
 
 
 def test_a_transient_failure_is_retried_once(monkeypatch):
-    """The lab's own link resets for a few seconds at a time; one hiccup should not turn
+    """A link can reset for a few seconds at a time; one hiccup should not turn
     into a failed search when trying again immediately would have worked."""
     calls = []
 

@@ -4,7 +4,7 @@
 is where they meet: bytes in, an `AnalysisResult` out. The route above it does validation
 and error mapping; the schemas beside it do presentation. Neither contains a step of the
 analysis, and nothing here knows what a status code is. That is what makes the whole
-pipeline runnable from a test, a notebook or a future CLI without a server (PLAN §6).
+pipeline runnable from a test, a notebook or a future CLI without a server.
 
 Two decisions in here are worth the reader's attention.
 
@@ -12,7 +12,7 @@ Two decisions in here are worth the reader's attention.
 delineated on the data-derived grid (3.1 m on the sample sheet); the error bar comes from
 three further grids at 5.0 / 3.5 / 2.5 m. Siting on the ensemble's coarsest member instead
 would save a flow field and cost the resolution the methodology was validated at, so the
-extra field is paid for deliberately (PLAN §3 Test C).
+extra field is paid for deliberately.
 
 **The triangulation is built once.** `ContourSurface` costs about a second on 159,113
 vertices and does not depend on the grid, so every grid samples the same surface: the
@@ -109,7 +109,7 @@ class Stopwatch:
 class AnalysisResult:
     """Everything one analysis produced, still as core objects.
 
-    Deliberately not JSON: the masks and grids in here are what Phase 10's map and the
+    Deliberately not JSON: the masks and grids in here are what the map and the
     validation suite want, and flattening them to numbers is the response schema's job,
     not the pipeline's.
     """
@@ -277,7 +277,7 @@ def analyse_area(
     config: Settings | None = None,
     progress: ProgressFn | None = None,
 ) -> AnalysisResult:
-    """A selection drawn on the map to a complete answer (PLAN3 §5).
+    """A selection drawn on the map to a complete answer.
 
     Only the first two stages differ from `analyse`: elevation tiles instead of a parsed
     sheet, `RasterSurface` instead of `ContourSurface`. The DEM they produce goes through

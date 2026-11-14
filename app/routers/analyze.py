@@ -25,10 +25,9 @@ held in places, and blocking the event loop would stall every other request incl
 mid-array, so the thread finishes on its own. The timeout is a promise to the caller,
 not a kill switch, and it is documented as such rather than overstated.
 
-**The file arrives as `contour_map`.** That is the field name the assignment brief
-fixes, so it is the one `/docs` shows and the one every example sends. `file` is still
-accepted, unnamed in the schema, because the demo page and this project's own history
-used it and a working client should not break on a rename. `_resolve_upload` takes
+**The file arrives as `contour_map`.** That is the field name `/docs` shows and
+every example sends. `file` is still accepted, unnamed in the schema, because earlier
+clients used it and a working client should not break on a rename. `_resolve_upload` takes
 whichever came, and a request carrying neither is a 422 that names both.
 
 **`/contours` is the exception to the semaphore.** It holds a parsed file and nothing
@@ -86,12 +85,12 @@ router = APIRouter(tags=["analysis"])
 _ACCEPTED_SUFFIXES = (".kml", ".kmz")
 
 UPLOAD_FIELD = "contour_map"
-"""The multipart field the contour map is expected under. Fixed by the assignment
-brief, so it is what `/docs`, the README and every curl example use."""
+"""The multipart field the contour map is expected under. It is what `/docs`, the README and
+every curl example use."""
 
 UPLOAD_FIELD_ALIAS = "file"
 """Also accepted, and kept out of the schema so `/docs` offers one file picker rather
-than two. It is what this service asked for before the brief named a field, and what
+than two. It is what this service asked for first, and what
 the demo page sent, so dropping it would break a client to gain nothing."""
 
 
@@ -163,7 +162,7 @@ _STATUS_BY_CODE: dict[str, int] = {
     "invalid_basemap": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "invalid_frame": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "render_too_large": status.HTTP_422_UNPROCESSABLE_ENTITY,
-    # The map path (Phase 3).
+    # The map path.
     "invalid_aoi": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "aoi_too_large": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "aoi_too_small": status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -460,7 +459,7 @@ async def contours(
     bbox: str | None = Form(
         None,
         description="Instead of a file: min_lon,min_lat,max_lon,max_lat of an area on the "
-        "map. Contours are then generated from elevation tiles (FR-2).",
+        "map. Contours are then generated from elevation tiles.",
     ),
     interval_m: float | None = Form(
         None,
@@ -1093,7 +1092,7 @@ async def find_catchment(
     target_depth_m: float | None = Form(None),
     ensemble: bool | None = Form(None),
 ) -> AnalysisResponse:
-    """The name the assignment brief uses. Same request, same response, one piece of
+    """An alias for `/analyzeContour`. Same request, same response, one piece of
     code behind both. Hidden from the schema so `/docs` shows one endpoint and not two
     identical ones."""
     return await analyze_contour(

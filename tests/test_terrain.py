@@ -1,4 +1,4 @@
-"""Phase 3. Pit filling, D8 flow direction, flow accumulation and slope.
+"""Pit filling, D8 flow direction, flow accumulation and slope.
 
 Flow routing is easy to get subtly wrong and hard to eyeball: a map of flow accumulation
 looks like a river network whether or not the numbers are right. So most of what follows
@@ -163,7 +163,7 @@ def test_an_unreachable_notch_does_not_drain_a_bowl():
 
 
 def test_filling_is_seeded_from_nodata_not_only_from_the_border():
-    """PLAN Phase 3: 2.5% of the sample grid is outside the contour hull, so a basin can
+    """2.5% of the sample grid is outside the contour hull, so a basin can
     drain off the mapped area through an interior hole without ever touching row 0.
 
     Here a bowl sits in the middle of a plateau with no route to the border, but a no-data
@@ -181,7 +181,7 @@ def test_filling_is_seeded_from_nodata_not_only_from_the_border():
 
 def test_epsilon_breaks_ties_across_a_flat(flat_plateau):
     """Without the epsilon gradient a flat band has no downhill direction anywhere, and
-    D8 turns every cell on it into its own outlet. The failure PLAN §2 Step 4 describes.
+    D8 turns every cell on it into its own outlet. The failure Step 4 describes.
 
     Measured on the sample sheet: epsilon 0 gives 108,526 outlets and a maximum
     accumulation of 712 cells; epsilon 1e-4 gives 308 outlets and 158,262.
@@ -235,7 +235,7 @@ def test_total_accumulation_leaving_the_map_equals_the_cell_count(flow, real_dem
 
 
 def test_weights_generalise_the_traversal():
-    """Phase 7 may want to accumulate rainfall rather than cells; the traversal should not
+    """Runoff modelling may want to accumulate rainfall rather than cells; the traversal should not
     need to change. Doubling every weight must double every total."""
     dem = plane_east()
     flow = ENGINE.analyse(dem)
@@ -253,7 +253,7 @@ def test_topological_order_processes_donors_before_receivers(flow):
 
 
 # --------------------------------------------------------------------------- #
-# Mass balance. PLAN §3 Test B
+# Mass balance. Test B
 # --------------------------------------------------------------------------- #
 def test_every_cell_reaches_exactly_one_outlet(flow, real_dem):
     terminal = flow.terminal_outlets()
@@ -264,7 +264,7 @@ def test_every_cell_reaches_exactly_one_outlet(flow, real_dem):
 
 
 def test_basin_areas_sum_to_the_mapped_area(flow, real_dem):
-    """PLAN §3 Test B. Every cell drains to exactly one outlet, so the basins tile the
+    """Test B. Every cell drains to exactly one outlet, so the basins tile the
     map and their areas must total the mapped area. Measured difference: 0.00000000%."""
     terminal = flow.terminal_outlets()
     areas = np.broadcast_to(real_dem.row_cell_areas[:, None], real_dem.shape)
@@ -312,11 +312,11 @@ def test_slope_is_finite_wherever_there_is_data(flow, real_dem):
 
 
 # --------------------------------------------------------------------------- #
-# The sample sheet. Phase 3 acceptance
+# The sample sheet
 # --------------------------------------------------------------------------- #
 def test_acceptance_max_accumulation(flow):
-    """PLAN Phase 3: ~157,766 cells at 5 m. That is 47.6% of the map, which is the same
-    basin PLAN §3 reports as site 1 at 395.4 ha. Two independent routes to one number."""
+    """~157,766 cells at 5 m. That is 47.6% of the map, which is the same
+    basin reports as site 1 at 395.4 ha. Two independent routes to one number."""
     assert flow.meta.max_accumulation == pytest.approx(157_766, rel=0.02)
 
 
@@ -326,17 +326,17 @@ def test_acceptance_largest_basin_matches_the_published_site(flow, real_dem):
 
 
 def test_pond_water_levels_are_quantised_to_the_contour_interval(flow, real_dem):
-    """A limitation worth pinning rather than hiding (PLAN §10).
+    """A limitation worth pinning rather than hiding.
 
     A depression fills until it spills over its lowest rim, and on a contour-derived DEM
     that rim sits on a contour line. So a pool's water level, and with it the natural
-    storage Phase 7 reports, can only take values a contour interval apart. On the sample,
+    storage runoff modelling reports, can only take values a contour interval apart. On the sample,
     90% of pools of 20 cells or more have a spill elevation within 0.1 m of a whole metre,
     with a median offset of 2.6 mm.
 
     Note what is *not* quantised: the fill depth of an individual cell, because the cell's
     own elevation is interpolated between contours and takes any value. Only 39% of
-    per-cell depths land near a whole metre. The distinction matters for how Phase 7
+    per-cell depths land near a whole metre. The distinction matters for how runoff modelling
     reports storage.
     """
     from scipy import ndimage

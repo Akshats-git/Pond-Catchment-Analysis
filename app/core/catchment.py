@@ -1,7 +1,6 @@
 """Delineating the catchment of a point, and saying how much to trust it.
 
-The catchment is every cell whose water eventually flows through the outlet (PLAN §2
-Step 6). D8 gives each cell one receiver, so the flow field is a *forest*: following the
+The catchment is every cell whose water eventually flows through the outlet. D8 gives each cell one receiver, so the flow field is a *forest*: following the
 pointers backwards from the outlet collects its basin, and collects every cell exactly
 once.
 
@@ -10,12 +9,12 @@ Three things around that turn a number into a trustworthy number.
 **Snapping.** A pond location named in lon/lat almost never lands exactly on the routed
 channel, and the channel itself moves between grid resolutions, by around 90 m on this
 sheet. So the outlet is snapped to the largest accumulation nearby, with the search
-radius scaled to the contour spacing rather than fixed (PLAN §11.4).
+radius scaled to the contour spacing rather than fixed.
 
 **Edge contact.** A catchment that runs off the mapped area has been clipped, and its
 area is a lower bound rather than an answer. The test has to be against *no-data or the
 array border*, not the border alone: 2.5% of this grid lies outside the contour hull, so
-a basin can leave the mapped area without ever reaching row 0 (PLAN §11.3). Testing only
+a basin can leave the mapped area without ever reaching row 0. Testing only
 the border wrongly labelled the 395 ha basin complete.
 
 **The ensemble.** The same site is delineated on three independent grids. Agreement means
@@ -57,7 +56,7 @@ class DonorIndex:
     `receivers` answers "where does this cell send its water"; delineation needs the
     opposite. Built once per flow field with a single argsort, then every catchment costs
     time proportional to its own size rather than to the whole map. That matters in
-    Phase 6, where a dozen candidate sites are delineated against one flow field.
+    site selection, where a dozen candidate sites are delineated against one flow field.
     """
 
     donors: np.ndarray
@@ -109,7 +108,7 @@ def upstream_mask(
 # Measurements on a mask
 # --------------------------------------------------------------------------- #
 def catchment_area(mask: np.ndarray, row_areas: np.ndarray) -> float:
-    """Latitude-weighted ground area of a cell mask, in m^2 (PLAN §2 Step 6)."""
+    """Latitude-weighted ground area of a cell mask, in m^2."""
     return float((mask.sum(axis=1) * row_areas).sum())
 
 
@@ -123,7 +122,7 @@ def edge_contact_ratio(mask: np.ndarray, nodata: np.ndarray) -> float:
     A side is "edge contact" when what lies beyond it is no-data *or* off the array. Both
     mean the same thing, which is that the catchment carries on into ground the contours
     never described. Testing only the array border is the mistake that reported the 395 ha
-    basin as complete (PLAN §11.3).
+    basin as complete.
     """
     if not mask.any():
         return 0.0
@@ -177,10 +176,10 @@ class Catchment:
 
     longest_flow_path_m: float
     """Distance from the hydraulically most remote cell to the outlet, along the flow
-    path. This is the `L` in Phase 7's time of concentration."""
+    path. This is the `L` in time of concentration."""
 
     flow_path_cell: int
-    """Flat index of that most remote cell. Phase 8 walks the receivers down from it to
+    """Flat index of that most remote cell. The geometry step walks the receivers down from it to
     draw the flow path; keeping the cell here means the traversal is not repeated."""
 
     flow_path_relief_m: float
@@ -201,7 +200,7 @@ class Catchment:
 
 @dataclass(frozen=True)
 class EnsembleResult:
-    """The same site delineated on several grids (PLAN §3 Test C)."""
+    """The same site delineated on several grids."""
 
     per_grid: tuple[Catchment, ...]
     mean_area_m2: float
@@ -233,7 +232,7 @@ class CatchmentDelineator:
     """Delineates catchments against a single flow field.
 
     Holds the donor index, so delineating many candidate sites against one grid pays the
-    reverse-index cost once. That is exactly what Phase 6 does.
+    reverse-index cost once. That is exactly what site selection does.
     """
 
     def __init__(self, flow: FlowField, *, config: CatchmentConfig | None = None) -> None:
@@ -250,7 +249,7 @@ class CatchmentDelineator:
 
         The routed channel shifts by around 90 m between the ensemble's grids, so a fixed
         30 m radius snaps to a different stream on each and the ensemble reports
-        disagreement that is really just a mis-snap (PLAN §11.4).
+        disagreement that is really just a mis-snap.
         """
         return (
             self.dem.meta.mean_contour_spacing_m
@@ -274,7 +273,7 @@ class CatchmentDelineator:
         radius = max(1, int(round(self.snap_radius_m / self.dem.resolution_m)))
         # Clamp every bound. An unclamped window silently wraps a negative index to the
         # far side of the array, and argmax then returns a cell on the opposite edge of
-        # the map (PLAN §11.9).
+        # the map.
         rows = slice(max(0, row - radius), min(ny, row + radius + 1))
         cols = slice(max(0, col - radius), min(nx, col + radius + 1))
 
@@ -314,7 +313,7 @@ class CatchmentDelineator:
         requested: tuple[float, float] | None = None,
         snap_distance_m: float = 0.0,
     ) -> Catchment:
-        """Delineate from a grid cell directly. This is the entry point Phase 6 uses, since its
+        """Delineate from a grid cell directly. This is the entry point site selection uses, since its
         candidates come from the accumulation grid rather than from a coordinate."""
         shape = self.dem.shape
         outlet = row * shape[1] + col
@@ -381,7 +380,7 @@ class CatchmentDelineator:
 class CatchmentEnsemble:
     """One delineator per grid resolution, so a site can be cross-checked (Test C).
 
-    The flow fields are built once, in the constructor, and reused for every site. Phase 6
+    The flow fields are built once, in the constructor, and reused for every site. Site selection
     ranks many candidates; rebuilding three flow fields per candidate would make the
     ensemble unaffordable rather than merely slow.
     """

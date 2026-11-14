@@ -1,4 +1,4 @@
-"""Phase 8. GeoJSON export.
+"""GeoJSON export.
 
 The acceptance criterion for this phase is visual: the output has to land on the right
 piece of ground in geojson.io. Nothing here can look at a map, so the tests check the
@@ -152,7 +152,7 @@ def test_simplification_keeps_the_corners_of_a_staircase():
 
 def test_simplification_below_one_cell_preserves_area(dem, sites):
     """The tolerance is under a cell on purpose: a vertex cannot move into a neighbouring
-    cell, so the enclosed area survives (PLAN Phase 8)."""
+    cell, so the enclosed area survives."""
     mask = sites[0].catchment.mask
     geometry, _ = mask_geometry(mask, dem)
     traced = sum(len(r) for r in trace_rings(mask).exteriors)

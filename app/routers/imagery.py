@@ -1,6 +1,6 @@
-"""Existing water and land availability, from satellite imagery (Phase 23).
+"""Existing water and land availability, from satellite imagery.
 
-The HLD's `POST /api/imagery/detect-ponds` and `POST /api/land/available`. Answered in
+`POST /imagery/detectPonds` and `POST /land/available`. Answered in
 this process, or forwarded to the separate CV service when `POND_CV_SERVICE_URL` is set.
 """
 
@@ -69,7 +69,7 @@ async def detect_ponds(request: SelectionRequest) -> dict:
     return await _answer("/api/v1/imagery/detectPonds", request, run)
 
 
-@router.post("/land/available", responses=_RESPONSES, summary="Land available for excavation (FR-3)")
+@router.post("/land/available", responses=_RESPONSES, summary="Land available for excavation")
 async def land_available(request: SelectionRequest) -> dict:
     """The selection split into water, built-up ground and tree cover, each as a
     (Multi)Polygon with its area and share, plus the share left available.

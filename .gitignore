@@ -13,7 +13,7 @@ env/
 *.npy
 *.npz
 
-# Runtime logs from run.sh
+# Runtime logs
 server.log
 pytest.log
 
@@ -35,4 +35,3 @@ private/
 # data/tiles/ (the committed demo-region seed) is NOT ignored.
 .cache/
 .data/
-.env.role

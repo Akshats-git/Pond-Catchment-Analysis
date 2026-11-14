@@ -1,7 +1,7 @@
-"""Phase 19 and 20. Async jobs, the result cache, and the gateway's dispatch.
+"""Async jobs, the result cache, and the gateway's dispatch.
 
 The gateway tests start real worker processes on local ports and dispatch to them over
-HTTP, so what is tested is the code that runs on the four lab containers, not a mock of it.
+HTTP, so what is tested is the code that runs in the compose stack, not a mock of it.
 """
 
 from __future__ import annotations

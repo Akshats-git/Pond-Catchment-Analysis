@@ -1,4 +1,4 @@
-"""Saved analyses (FR-9): the HLD's `GET/POST /api/ponds`."""
+"""Saved analyses: `GET/POST /ponds`."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Phase 23. Existing water and land availability from imagery.
+"""Existing water and land availability from imagery.
 
 The imagery is synthetic, with a known answer: a smooth dark pond of known size in
 textured fields, beside a rough bright village block. The tiles are real JPEG-free PNGs

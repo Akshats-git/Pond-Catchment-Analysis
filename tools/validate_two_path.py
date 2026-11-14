@@ -1,11 +1,11 @@
-"""Phase 17: the same ground through two independent data paths.
+"""the same ground through two independent data paths.
 
 The provided sheet is a 1 m contour survey. The map path reads the same ground from free
 ~30 m SRTM tiles. Running both and comparing says, with numbers, how far the free-data
 answer can be trusted. No other data path can be checked this way, because nobody else has
 a surveyed sheet to check it against.
 
-    python -m tools.validate_two_path            # writes docs/VALIDATION.md
+    python -m tools.validate_two_path            # writes private/docs/VALIDATION.md
     python -m tools.validate_two_path --quick    # the default settings only
 
 Runs offline: the tiles for the sheet are committed under `data/tiles/`, and rainfall is
@@ -34,7 +34,7 @@ from app.schemas.requests import AnalysisParams  # noqa: E402
 
 SHEET = "data/contours_1m.kml"
 SHEET_BBOX = (81.2814, 21.2398, 81.3126, 21.2636)
-OUT = Path(__file__).resolve().parent.parent / "docs" / "VALIDATION.md"
+OUT = Path(__file__).resolve().parent.parent / "private" / "docs" / "VALIDATION.md"
 
 
 def metres_between(a: tuple[float, float], b: tuple[float, float]) -> float:

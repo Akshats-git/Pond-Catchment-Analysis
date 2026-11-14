@@ -1,4 +1,4 @@
-"""Phase 24. Saving, listing, reopening and deleting analyses (FR-9)."""
+"""Saving, listing, reopening and deleting analyses."""
 
 from __future__ import annotations
 

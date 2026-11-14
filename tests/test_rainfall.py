@@ -139,7 +139,7 @@ def test_the_window_is_whole_years_and_stops_before_this_one(provider):
 
 
 def test_a_location_is_fetched_once(monkeypatch, provider):
-    """A contour sheet is one location, and a grader re-running it should pay for the
+    """A contour sheet is one location, and re-running it should pay for the
     fetch once."""
     calls: list[tuple[float, float]] = []
 

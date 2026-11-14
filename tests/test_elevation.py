@@ -1,4 +1,4 @@
-"""Phase 13. The elevation provider.
+"""The elevation provider.
 
 What has to be true of tiles before a DEM is built from them: that the terrarium decoding
 keeps its fractional metres, that the ground resolution carries the cosine, that the right
@@ -42,7 +42,7 @@ def test_terrarium_zero_is_128_0_0():
 
 
 def test_the_blue_channel_carries_fractions_of_a_metre():
-    """PLAN3 §11.1. Dropping B/256 would quantise to whole metres."""
+    """Dropping B/256 would quantise to whole metres."""
     z = decode_terrarium(np.array([[[129, 10, 128]]], dtype=np.uint8))[0, 0]
     assert z == pytest.approx(256 + 10 + 0.5)
 
@@ -61,7 +61,7 @@ def test_z13_is_17_8_metres_at_the_sheet():
 
 
 def test_the_equatorial_figure_would_overstate_resolution_by_seven_percent():
-    """PLAN3 §11.2: the cosine is not optional at 21 N."""
+    """: the cosine is not optional at 21 N."""
     assert tile_resolution_m(13, 0.0) / tile_resolution_m(13, 21.25) == pytest.approx(1.073, abs=0.002)
 
 
@@ -127,7 +127,7 @@ def test_the_committed_seed_tiles_serve_the_sheet_offline():
     lon, lat = np.meshgrid(np.linspace(SHEET_BBOX[0], SHEET_BBOX[2], 60),
                            np.linspace(SHEET_BBOX[1], SHEET_BBOX[3], 60))
     z = mosaic.sample(lon, lat)
-    # PLAN3 §3.1: SRTM over the sheet reads 266-299 m; the survey says 267-298 m.
+    # : SRTM over the sheet reads 266-299 m; the survey says 267-298 m.
     assert 265 <= np.nanmin(z) <= 268 and 297 <= np.nanmax(z) <= 300
     assert set(mosaic.stats["tile_sources"]) <= {"seed", "memory"}
 

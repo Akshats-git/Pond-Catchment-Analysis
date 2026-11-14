@@ -1,4 +1,4 @@
-"""Phase 2. Local metric projection.
+"""Local metric projection.
 
 The projection is three lines of arithmetic, which is exactly why it is worth testing:
 everything downstream assumes the grid is square in metres and exactly invertible, and
@@ -27,7 +27,7 @@ def test_origin_maps_to_zero(proj):
 
 
 def test_round_trip_is_exact(proj):
-    """Phase 4 converts real-world coordinates to grid indices and back. A lossy round
+    """Catchment tracing converts real-world coordinates to grid indices and back. A lossy round
     trip there returns a neighbouring cell, and somebody else's catchment."""
     rng = np.random.default_rng(0)
     lonlat = np.column_stack([
@@ -64,7 +64,7 @@ def test_area_factor_is_one_at_the_origin(proj):
 
 
 def test_area_factor_shrinks_polewards(proj):
-    """PLAN §2 Step 6: a projected cell covers res^2 * cos(lat)/cos(lat0) on the ground."""
+    """Step 6: a projected cell covers res^2 * cos(lat)/cos(lat0) on the ground."""
     assert proj.area_factor(RAIPUR[1] + 1.0) < 1.0 < proj.area_factor(RAIPUR[1] - 1.0)
 
 

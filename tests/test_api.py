@@ -1,4 +1,4 @@
-"""Phase 9. The HTTP surface.
+"""The HTTP surface.
 
 The analysis itself is validated elsewhere: `test_catchment_analytic.py` proves the area
 against a surface with a known answer, `test_massbalance.py` proves nothing leaks, and
@@ -9,7 +9,7 @@ as one status code and one error envelope rather than a stack trace.
 
 Most tests run on the synthetic valley, which goes through the whole service in about a
 tenth of a second, so the error paths and the response contract cost nothing to cover.
-Two things still need the real sheet. The figures PLAN §3 reports, and the ensemble
+Two things still need the real sheet. The figures reports, and the ensemble
 confidence on terrain that has some, and those share one module-scoped request.
 
 One property is worth stating in advance, because it looks like a bug in the assertions
@@ -67,7 +67,7 @@ def post(
     """One analysis request. Form values go out as strings, exactly as a browser sends
     them, so the tests exercise the same coercion a real client would.
 
-    The default `field` is the name the brief fixes, so every test in this file that does
+    The default `field` is the documented name, so every test in this file that does
     not say otherwise is a test that the documented request works."""
     return client.post(
         url,
@@ -99,7 +99,7 @@ def valley(client: TestClient) -> dict:
 @pytest.fixture(scope="module")
 def sample(client: TestClient) -> dict:
     """The provided sheet, analysed once with the ensemble on. The acceptance run of
-    PLAN Phase 9. About ten seconds, which is why it is shared rather than repeated."""
+    About ten seconds, which is why it is shared rather than repeated."""
     if not os.path.exists(SAMPLE):
         pytest.skip(f"{SAMPLE} is not present")
     with open(SAMPLE, "rb") as handle:
@@ -121,7 +121,7 @@ def test_health_reports_what_the_host_can_afford(client: TestClient, monkeypatch
     """The demo page reads its ensemble switch off /health, so /health has to tell it.
 
     Without this the page ships with the cross-check ticked, sends `ensemble=true` to a
-    host that refuses it, and every upload a grader tries comes back a 422 on a page that
+    host that refuses it, and every upload a user tries comes back a 422 on a page that
     looks perfectly healthy.
     """
     body = client.get("/health").json()
@@ -141,7 +141,7 @@ def test_health_reports_what_the_host_can_afford(client: TestClient, monkeypatch
 def test_root_falls_back_to_the_docs_without_the_demo_page(
     client: TestClient, monkeypatch, tmp_path
 ) -> None:
-    """The page is a single static file, so "is it there" is the whole of the Phase 11
+    """The page is a single static file, so "is it there" is the whole of the
     deployment check. If a build ever ships without it, the service stays usable."""
     monkeypatch.setattr(main, "STATIC_DIR", tmp_path)
     response = client.get("/", follow_redirects=False)
@@ -158,7 +158,7 @@ def test_root_serves_the_demo_page(client: TestClient) -> None:
 
 
 def test_demo_page_loads_nothing_from_a_third_party(client: TestClient) -> None:
-    """PLAN §5 asks for a CDN-free single file, and the reason is the deployment: the
+    """asks for a CDN-free single file, and the reason is the deployment: the
     page has to work behind a proxy that blocks unpkg and on a free-tier container with
     no build step. Map tiles are the one exception. They are imagery, requested by the
     viewer's browser and credited on the map, so this checks for external *code*.
@@ -170,7 +170,7 @@ def test_demo_page_loads_nothing_from_a_third_party(client: TestClient) -> None:
 
 
 def test_openapi_documents_the_endpoint_and_its_failures(client: TestClient) -> None:
-    """The rubric's API-documentation line is satisfied by `/docs`, which is only worth
+    """API documentation is satisfied by `/docs`, which is only worth
     anything if the schema actually describes the errors as well as the success."""
     schema = client.get("/openapi.json").json()
     operation = schema["paths"][ENDPOINT]["post"]
@@ -179,7 +179,7 @@ def test_openapi_documents_the_endpoint_and_its_failures(client: TestClient) -> 
 
 
 def test_alias_is_the_same_endpoint_not_a_second_one(client: TestClient) -> None:
-    """The brief names `findCatchment`; the plan names `analyzeContour`. One
+    """`findCatchment` is an alias of `analyzeContour`. One
     implementation answers both, and only one of them is in the schema."""
     alias = post(client, VALLEY_KML, url=ALIAS, ensemble=False)
     assert alias.status_code == 200
@@ -193,7 +193,7 @@ def test_alias_is_the_same_endpoint_not_a_second_one(client: TestClient) -> None
 # --------------------------------------------------------------------------- #
 # The upload field
 #
-# The brief fixes the multipart field name at `contour_map`, and a grader sending it is
+# The multipart field name is `contour_map`, and a client sending it is
 # the one request that has to work. `file` is the name this service used first and stays
 # accepted, so these three tests pin the whole contract: the documented name works, the
 # old name still works, and neither is a legible error rather than a framework one.
@@ -261,8 +261,8 @@ def test_the_alias_field_gets_the_same_answer_when_sent_as_text(
 
 
 def test_docs_advertise_the_brief_field_and_only_that_one(client: TestClient) -> None:
-    """`/docs` is where a grader looks for the field name, so it must show the one the
-    brief fixed and must not offer a second file picker beside it."""
+    """`/docs` is where a reader looks for the field name, so it must show the one the
+    documented and must not offer a second file picker beside it."""
     schema = client.get("/openapi.json").json()
     for url in (ENDPOINT, CONTOURS):
         content = schema["paths"][url]["post"]["requestBody"]["content"]
@@ -362,7 +362,7 @@ def test_parameters_are_echoed_with_defaults_resolved(client: TestClient) -> Non
 
 
 def test_runoff_is_event_based_not_annual(valley: dict) -> None:
-    """PLAN §4's pitfall, guarded at the API: SCS-CN applied to a year's rain as one
+    """'s pitfall, guarded at the API: SCS-CN applied to a year's rain as one
     storm returns about 92%, roughly six times the real yield. Both numbers are
     reported, and the one the service uses has to be the smaller."""
     runoff = valley["recommended_site"]["runoff"]
@@ -551,10 +551,10 @@ def test_every_failure_uses_one_envelope(client: TestClient, payload: bytes, for
 
 
 # --------------------------------------------------------------------------- #
-# The provided sheet. PLAN §3, through the API
+# The provided sheet. through the API
 # --------------------------------------------------------------------------- #
 def test_sample_sheet_reproduces_the_documented_analysis(sample: dict) -> None:
-    """PLAN Phase 9's acceptance criterion: the sample map returns the §3 results.
+    """acceptance criterion: the sample map returns the §3 results.
 
     The catchment is checked against the ensemble's own error bar rather than against a
     literal, so the test measures agreement between the grids, which is the claim, and
@@ -577,7 +577,7 @@ def test_sample_sheet_reproduces_the_documented_analysis(sample: dict) -> None:
 
 
 def test_sample_sheet_runoff_is_in_the_expected_band(sample: dict) -> None:
-    """11-19% is what this terrain yields (PLAN §4). Outside it, either the curve number
+    """11-19% is what this terrain yields. Outside it, either the curve number
     or the per-day summation is wrong, and both are worth failing over."""
     low, high = settings.hydrology.expected_runoff_coefficient_range
     runoff = sample["recommended_site"]["runoff"]
@@ -590,7 +590,7 @@ def test_sample_sheet_runoff_is_in_the_expected_band(sample: dict) -> None:
 
 def test_sample_alternatives_are_independent_basins(sample: dict) -> None:
     """Suppression removes each pick's whole catchment, so the alternatives are separate
-    sub-basins rather than five points strung along one stream (PLAN §11.7)."""
+    sub-basins rather than five points strung along one stream."""
     sites = sites_of(sample)
     assert len(sites) == settings.siting.default_top_n
     areas = [site["catchment"]["area_ha"] for site in sites]
@@ -828,7 +828,7 @@ def test_the_demo_page_can_turn_the_contours_on(client: TestClient) -> None:
 #
 # Every test below asks for a basemap that needs no network. The fallback path is the one
 # place a fetch is simulated, and it is simulated rather than performed: a suite that
-# reaches the internet fails in a lab with no route out, which is exactly where this
+# reaches the internet fails with no route out, which is exactly where this
 # service is deployed.
 # --------------------------------------------------------------------------- #
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
@@ -995,7 +995,7 @@ def test_a_failed_tile_is_not_asked_for_twice(monkeypatch) -> None:
 
 
 def test_a_failed_tile_is_asked_for_again_later(monkeypatch) -> None:
-    """On the lab's link a tile that timed out once was a hole in every later imagery
+    """On a flaky link a tile that timed out once was a hole in every later imagery
     request until the process restarted. After tile_retry_after_s it is fetched again."""
     monkeypatch.setattr(render_module, "_TILE_CACHE", type(render_module._TILE_CACHE)())
     monkeypatch.setattr(render_module, "_TILE_FAILED", {})
@@ -1056,7 +1056,7 @@ def test_openapi_documents_the_render_endpoint(client: TestClient) -> None:
     ref = operation["requestBody"]["content"]["multipart/form-data"]["schema"]["$ref"]
     body = schema["components"]["schemas"][ref.rsplit("/", 1)[-1]]
     # The alias is accepted and undocumented here for the same reason it is on the other
-    # two endpoints: /docs should offer one file picker, under the name the brief fixes.
+    # two endpoints: /docs should offer one file picker, under one name.
     assert UPLOAD_FIELD in body["properties"]
     assert UPLOAD_FIELD_ALIAS not in body["properties"]
     assert {"basemap", "contours", "frame", "width", "height"} <= set(body["properties"])
@@ -1064,7 +1064,7 @@ def test_openapi_documents_the_render_endpoint(client: TestClient) -> None:
 
 def test_the_sample_sheet_renders(client: TestClient) -> None:
     """The real file at the real default size, which is the one that has to work in front
-    of a grader. Hillshade, so the test does not depend on a tile server."""
+    of a user. Hillshade, so the test does not depend on a tile server."""
     from PIL import Image
 
     if not os.path.exists(SAMPLE):

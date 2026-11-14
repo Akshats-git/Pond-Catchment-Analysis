@@ -1,6 +1,6 @@
 # One image, four roles: gateway, worker, CV service, and (behind nginx) the page.
 # Which role a container plays is decided by its environment and command in
-# docker-compose.yml, exactly as on the lab containers it is decided by .env.role.
+# docker-compose.yml.
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -20,7 +20,7 @@ COPY data ./data
 
 USER pond
 EXPOSE 5000
-# The same settings run.sh applies on a 512 MB lab container: the contour path's
+# Sized for a 512 MB container (Render's free tier): the contour path's
 # four-grid ensemble does not fit, and asking for it gets a 422 rather than an OOM.
 ENV POND_API_DEFAULT_ENSEMBLE=false \
     POND_API_ALLOW_ENSEMBLE=false \

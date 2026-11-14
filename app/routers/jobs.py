@@ -1,4 +1,4 @@
-"""The async job API (PLAN3 §6.1) and the cluster status the gateway reports."""
+"""The async job API and the cluster status the gateway reports."""
 
 from __future__ import annotations
 

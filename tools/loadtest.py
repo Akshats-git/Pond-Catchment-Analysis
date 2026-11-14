@@ -1,7 +1,6 @@
-"""Load generator for the map path (Phase 21): throughput, latency, errors and memory.
+"""Load generator for the map path : throughput, latency, errors and memory.
 
-    python -m tools.loadtest --url http://localhost:5229 --requests 60 --concurrency 6
-    python -m tools.loadtest --url http://10.1.75.53:5229 --docker ""        # the lab
+    python -m tools.loadtest --url http://localhost:8080 --requests 60 --concurrency 6
 
 A closed loop: `concurrency` clients, each sending its next request as soon as the last one
 answers, until `requests` have been sent. Every request is `POST /analyzeArea`, a mix of
@@ -12,7 +11,7 @@ answers for a request that is meant to be computed; `--repeat` does the opposite
 measure the cache.
 
 Memory is sampled from `docker stats` for the named containers while the load runs; on
-the lab it is read from each container's cgroup by `deploy/status.sh` instead.
+a host without Docker, read the process's memory instead.
 """
 
 from __future__ import annotations
@@ -164,7 +163,7 @@ def summarise(results: list[dict], wall_s: float) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--url", default="http://localhost:5229")
+    parser.add_argument("--url", default="http://localhost:8080")
     parser.add_argument("--requests", type=int, default=60)
     parser.add_argument("--concurrency", type=int, default=6)
     parser.add_argument("--large-share", type=float, default=0.3)

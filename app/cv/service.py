@@ -1,7 +1,7 @@
-"""The imagery answers, as GeoJSON: existing water (HLD §6.8) and land availability (FR-3).
+"""The imagery answers, as GeoJSON: existing water and land availability.
 
 Runs in the API process by default. `app` below is also a complete service of its own,
-the HLD's container 3, started with `uvicorn app.cv.service:app`; set `POND_CV_SERVICE_URL`
+a separate container, started with `uvicorn app.cv.service:app`; set `POND_CV_SERVICE_URL`
 on the API and it calls that instead. Keeping the CV apart is what lets it be scaled, or
 swapped for a trained model, without the terrain code noticing.
 """

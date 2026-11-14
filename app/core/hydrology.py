@@ -2,7 +2,7 @@
 
 **Runoff.** SCS-CN is an *event* model. Applied to a year's rainfall as a single 1200 mm
 storm it returns a 92% runoff coefficient, which no catchment on earth produces; applied
-per rain day and summed it returns 16%, which is what this terrain does (PLAN §4). Both
+per rain day and summed it returns 16%, which is what this terrain does. Both
 numbers are computed here. The wrong one is deliberate, because a report that only shows
 the right answer cannot show why it is right.
 
@@ -24,7 +24,7 @@ straight sides do, which is the whole argument for integrating.
 The pond's depth comes from the *target depth* and the terrain, never from the depression
 depth: a site on a channel has no natural storage at all, and reporting zero capacity for
 the best site on the sheet would be an artefact of the model rather than a fact about the
-ground (PLAN §11 / Phase 7).
+ground.
 
 **Time of concentration.** Kirpich, on the longest flow path and the drop along *that*
 path. Not the basin's overall relief, which belongs to a different and usually steeper
@@ -102,7 +102,7 @@ class RunoffResult:
     single_event_depth_mm: float
     single_event_coefficient: float
     """The same model applied to the annual total as one storm. Kept because it is the
-    error worth showing: 1104 mm and 92% against 192 mm and 16% (PLAN §4)."""
+    error worth showing: 1104 mm and 92% against 192 mm and 16%."""
 
     method: str = "SCS-CN, applied per rain day and summed"
 
@@ -137,7 +137,7 @@ def scs_cn_runoff(
     *,
     config: HydrologyConfig | None = None,
 ) -> RunoffResult:
-    """Runoff depth from a daily rainfall series (PLAN §4).
+    """Runoff depth from a daily rainfall series.
 
         Q = (P - Ia)^2 / (P - Ia + S)     for P > Ia, else 0
 
@@ -263,7 +263,7 @@ class StageStorage:
     ground above the outlet, which is the half of any hollow a structure at the outlet keeps.
     Zero on a channel, which is where catchment-first siting puts most sites; those ponds
     are dug or bunded, and every stage above 0 comes from the target depth against the
-    surrounding ground, never from the depression depth (PLAN §11)."""
+    surrounding ground, never from the depression depth."""
 
     natural_storage_area_m2: float
 
@@ -271,7 +271,7 @@ class StageStorage:
     """The whole natural hollow the site sits in, both sides of the outlet, filled to its
     spill level. `natural_storage_m3` counts only the upstream half, which is the half a
     bund at the outlet would keep, but the hollow is what a surveyor standing there sees,
-    and PLAN §3 reports it for site 3 of the sample (7,400 m^3)."""
+    and reports it for site 3 of the sample (7,400 m^3)."""
 
     site_depression_area_m2: float
     is_excavated: bool
@@ -292,7 +292,7 @@ class StageStorage:
 
     pond_mask: np.ndarray
     """(ny, nx) bool. The water surface of the pond at its usable stage, which is what
-    Phase 8 draws as the pond footprint."""
+    the map draws as the pond footprint."""
 
     spill_stage_index: int | None
     """Index of the stage at which the water first tops a divide and spreads. The step
@@ -553,7 +553,7 @@ def water_balance(
     target_depth_m: float | None = None,
     config: HydrologyConfig | None = None,
 ) -> WaterBalance:
-    """Everything Phase 9 reports about the water at one site, in one call."""
+    """Everything the API reports about the water at one site, in one call."""
     cfg = config or settings.hydrology
 
     runoff = scs_cn_runoff(rainfall, curve_number, config=cfg)

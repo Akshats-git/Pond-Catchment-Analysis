@@ -1,7 +1,7 @@
-"""Saved analyses (HLD FR-9): keep a result, list them, open one again.
+"""Saved analyses: keep a result, list them, open one again.
 
 SQLite, because it is in the standard library, needs no server, and one file is all a
-village-scale planning tool will ever need; the HLD's container 4 is this file on a
+village-scale planning tool will ever need; in the compose stack it is this file on a
 volume. The store keeps the *whole* response, so reopening a site draws exactly what was
 analysed, and a small summary beside it so the list never has to parse a megabyte of
 GeoJSON per row.

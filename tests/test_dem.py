@@ -1,8 +1,8 @@
-"""Phase 2. Contour-interpolated DEM.
+"""Contour-interpolated DEM.
 
 Two halves again. Synthetic surfaces with known answers test the mechanics, because a
 plane interpolates to itself exactly and a NaN-aware Gaussian has an invariant that can
-be checked rather than eyeballed. The sample sheet then pins the Phase 2 acceptance
+be checked rather than eyeballed. The sample sheet then pins the sample-sheet acceptance
 numbers.
 """
 
@@ -45,7 +45,7 @@ def dem(surface):
 # Resolution is derived from the data, not chosen
 # --------------------------------------------------------------------------- #
 def test_resolution_follows_from_the_contour_spacing(surface):
-    """PLAN §2 Step 2: spacing = mapped area / total length, resolution = spacing / 4."""
+    """Step 2: spacing = mapped area / total length, resolution = spacing / 4."""
     assert surface.mean_spacing_m == pytest.approx(
         surface.hull_area_m2 / surface.total_length_m
     )
@@ -63,7 +63,7 @@ def test_sample_resolution_is_in_the_expected_regime(surface):
 def test_resolution_tracks_the_data_rather_than_the_sheet(contours):
     """Halve the contour density and the derived resolution must coarsen with it.
 
-    This is the anti-hard-coding guarantee of PLAN §9 made testable: drop every second
+    This is the anti-hard-coding guarantee of made testable: drop every second
     contour level and the grid should get coarser, because the data got coarser.
     """
     keep = np.isin(contours.line_elevations, contours.metadata.levels[::2])
@@ -187,7 +187,7 @@ def test_cells_outside_the_hull_are_nodata(dem):
 
 
 # --------------------------------------------------------------------------- #
-# Smoothing. PLAN §11.2, the 357 m peak
+# Smoothing. the 357 m peak
 # --------------------------------------------------------------------------- #
 def test_smoothing_cannot_leave_the_input_range(dem, contours):
     """The normalised Gaussian is a weighted average of valid neighbours, so this holds
@@ -234,7 +234,7 @@ def test_smoothing_preserves_the_data_footprint(dem):
 
 
 def test_smoothing_moves_the_surface_by_less_than_a_contour_interval(dem):
-    """PLAN Phase 2 acceptance, on the 99.9th percentile.
+    """acceptance, on the 99.9th percentile.
 
     The raw *maximum* is 1.16 m, marginally over the 1 m interval, at 13 cells of 622,227.
     All 13 sit on the convex hull where Delaunay bridges contour 273 to contour 283 with
@@ -247,7 +247,7 @@ def test_smoothing_moves_the_surface_by_less_than_a_contour_interval(dem):
 
 
 def test_disabling_smoothing_is_a_no_op_on_the_surface(surface):
-    """Phase 5 has to run the pipeline with smoothing off to show it earns its place."""
+    """The validation has to run the pipeline with smoothing off to show it earns its place."""
     unsmoothed = surface.sample(5.0, smooth=False)
     assert unsmoothed.meta.smoothing_sigma_m == 0.0
     assert np.array_equal(
@@ -271,7 +271,7 @@ def _d8_dead_end_fraction(z: np.ndarray, valid: np.ndarray) -> float:
 
 
 def test_smoothing_halves_the_cells_where_d8_has_nowhere_to_go(surface):
-    """The reason the step exists at all (PLAN §2 Step 3).
+    """The reason the step exists at all.
 
     Linear interpolation between two contour lines makes the ground between them a *flat
     band*, and on a flat band every cell is exactly level with its neighbours, so D8 has
@@ -282,7 +282,7 @@ def test_smoothing_halves_the_cells_where_d8_has_nowhere_to_go(surface):
     The fix does not need to reshape the terrain. It only needs to break the exact
     ties, which is why a sigma of a third of a cell is enough. Measured on the sample:
     13.91% of cells are D8 dead ends before smoothing, 7.07% after. A 49% reduction.
-    The remainder is what Phase 3's pit filling is for.
+    The remainder is what pit filling is for.
     """
     dem = surface.sample(5.0)
     before = _d8_dead_end_fraction(dem.raw_z, ~dem.nodata)
@@ -292,7 +292,7 @@ def test_smoothing_halves_the_cells_where_d8_has_nowhere_to_go(surface):
 
 
 # --------------------------------------------------------------------------- #
-# Grid geometry. PLAN §11.8
+# Grid geometry. 
 # --------------------------------------------------------------------------- #
 def test_index_round_trip_hits_the_same_cell(dem):
     """`int(round((v - origin) / res))`, with the division inside `round`. Getting this
@@ -323,7 +323,7 @@ def test_contains_rejects_out_of_bounds(dem):
 
 
 # --------------------------------------------------------------------------- #
-# Area. PLAN §2 Step 6
+# Area. Step 6
 # --------------------------------------------------------------------------- #
 def test_cell_area_is_latitude_weighted(dem):
     """res^2 * cos(lat)/cos(lat0): cells shrink towards the pole."""
@@ -356,20 +356,20 @@ def test_row_cell_areas_helper_matches_the_dem(dem):
 
 
 # --------------------------------------------------------------------------- #
-# The Phase 2 acceptance numbers
+# The sample-sheet acceptance numbers
 # --------------------------------------------------------------------------- #
 def test_acceptance_mapped_area(dem):
-    """PLAN Phase 2: 8.309 km^2."""
+    """8.309 km^2."""
     assert dem.meta.mapped_area_m2 / 1e6 == pytest.approx(8.309, abs=0.005)
 
 
 def test_acceptance_nodata_fraction(dem):
-    """PLAN Phase 2: ~3%. The grid is a rectangle; the contour hull is not."""
+    """~3%. The grid is a rectangle; the contour hull is not."""
     assert 0.01 < dem.meta.nodata_fraction < 0.05
 
 
 def test_acceptance_elevation_range_is_exact(dem):
-    """PLAN Phase 2: exactly 267-298 m, the contour range and nothing beyond it.
+    """exactly 267-298 m, the contour range and nothing beyond it.
 
     The upper bound is one-sided and needs no tolerance: convexity forbids overshoot, so
     a failure here means the 357 m bug is back. The small undershoot is real and expected

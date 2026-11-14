@@ -1,6 +1,6 @@
 """Pit filling, D8 flow direction, flow accumulation and slope.
 
-The three steps that turn a surface into a drainage network (PLAN §2 steps 4-5).
+The three steps that turn a surface into a drainage network.
 
 **Fill the pits.** A DEM built from contours is full of one-cell hollows that exist only
 because the interpolation is imperfect. Water routed on it gets stuck in them. Priority-
@@ -22,7 +22,7 @@ cells by descending elevation is a topological order of the flow graph. One pass
 that order, adding each cell's running total to its receiver, gives the number of cells
 draining through every cell. The streams light up as ridges of large values.
 
-`TerrainEngine` is an interface (PLAN §5, §8). The HLD names pysheds; we implement the
+`TerrainEngine` is an interface. pysheds would also do; we implement the
 same D8 methodology directly so the service stays deployable on a free tier, and swapping
 in pysheds later means writing one more subclass.
 """
@@ -84,7 +84,7 @@ class FlowMetadata:
 
     outlet_count: int
     """Cells with no downhill neighbour: the points where water leaves the mapped area.
-    Every valid cell drains to exactly one of these, which is what the Phase 5 mass
+    Every valid cell drains to exactly one of these, which is what the mass
     balance checks."""
 
     max_accumulation: float
@@ -104,7 +104,7 @@ class FlowField:
     """(ny * nx,) int64. Flat index of the cell each cell drains into.
 
     -1 marks an outlet (water leaves the mapped area here) or a no-data cell. Flat rather
-    than a direction code because Phase 4 walks these pointers backwards, and an index is
+    than a direction code because catchment tracing walks these pointers backwards, and an index is
     what that traversal actually needs.
     """
 
@@ -113,7 +113,7 @@ class FlowField:
 
     order: np.ndarray
     """(n_valid,) int64. Valid cells by descending filled elevation. A topological
-    order of the flow graph, reused by Phase 4 rather than recomputed."""
+    order of the flow graph, reused by catchment tracing rather than recomputed."""
 
     slope: np.ndarray
     """(ny, nx) float64. Rise over run, dimensionless. NaN at no-data."""
@@ -129,8 +129,8 @@ class FlowField:
         """(ny, nx) int64. The flat index of the outlet each cell ultimately drains to.
 
         Every valid cell reaches exactly one outlet, so this partitions the map into
-        basins. Phase 4 uses it to suppress a whole sub-basin after picking a site, and
-        Phase 5's mass balance sums the basins and checks the total against the mapped
+        basins. Catchment tracing uses it to suppress a whole sub-basin after picking a site, and
+        mass balance sums the basins and checks the total against the mapped
         area.
 
         Resolved by walking the topological order *backwards*: in ascending elevation
@@ -149,7 +149,7 @@ class FlowField:
 
         Accumulation counts *cells*, so this uses the latitude-weighted area of the row
         the cell sits in. Across one sheet the row-to-row variation is under 0.01%, so
-        the approximation sits far below the spread between grids. Phase 4 sums the real
+        the approximation sits far below the spread between grids. Catchment tracing sums the real
         per-cell areas over the catchment mask when the number has to be exact.
         """
         return float(self.accumulation[row, col]) * float(
@@ -163,8 +163,8 @@ class FlowField:
 class TerrainEngine(ABC):
     """Turns a DEM into a flow field.
 
-    The seam PLAN §8 promises: the pipeline depends on this, not on how the routing is
-    done, so a pysheds- or GPU-backed implementation drops in without touching Phase 4
+    The seam promises: the pipeline depends on this, not on how the routing is
+    done, so a pysheds- or GPU-backed implementation drops in without touching catchment tracing
     onwards.
     """
 
@@ -342,7 +342,7 @@ class D8TerrainEngine(TerrainEngine):
         """Horn's 3x3 gradient, as rise over run.
 
         The same estimator GDAL and ArcGIS use: a weighted central difference that is far
-        less noisy than a two-cell difference, which matters because Phase 6 rejects sites
+        less noisy than a two-cell difference, which matters because site selection rejects sites
         on a 3% slope and single-cell noise would reject good ground at random.
 
         No-data neighbours are replaced by the centre cell, the standard edge convention:

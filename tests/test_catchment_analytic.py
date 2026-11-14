@@ -1,4 +1,4 @@
-"""Phase 5. Validating the catchment calculation against answers known in advance.
+"""Validating the catchment calculation against answers known in advance.
 
 Everything else in this repository checks the pipeline against itself or against the one
 sample sheet. This file checks it against arithmetic, and it is the evidence behind every
@@ -35,7 +35,7 @@ from tests.fixtures.make_synthetic import VALLEY, clip_contours
 
 SAMPLE = "data/contours_1m.kml"
 
-# PLAN §3 Test A samples the channel at these three points.
+# Test A samples the channel at these three points.
 TEST_POINTS = (250.0, 500.0, 750.0)
 
 # Points where the channel elevation is a whole number, so the outlet cell coincides with
@@ -93,7 +93,7 @@ def test_the_synthetic_valley_round_trips_through_the_parser(valley_contours):
 
 
 def test_the_grid_lands_in_the_regime_the_plan_describes(valley_surface):
-    """PLAN §3 Test A reports sigma = 2.5 m on a 5 m grid. Both fall out of the data:
+    """Test A reports sigma = 2.5 m on a 5 m grid. Both fall out of the data:
     the contours are 19.7 m apart, so the derived grid is 4.9 m and sigma is 2.46 m."""
     assert valley_surface.mean_spacing_m == pytest.approx(19.7, abs=0.5)
     assert valley_surface.auto_resolution_m == pytest.approx(4.93, abs=0.1)
@@ -121,7 +121,7 @@ def test_the_whole_domain_is_mapped(valley_surface):
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("y", TEST_POINTS)
 def test_analytic_catchment_area_at_five_metres(valley_surface, y):
-    """PLAN §3 Test A. The catchment is right to within one grid row of the outlet.
+    """Test A. The catchment is right to within one grid row of the outlet.
 
     One row is 5,000 m^2 at this resolution. A sub-cell error in placing the outlet
     along a flat interpolated band, not a routing failure. The absolute discrepancy is the
@@ -185,7 +185,7 @@ def test_the_error_is_a_constant_number_of_cells_not_a_constant_fraction(valley_
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("y", TEST_POINTS)
 def test_smoothing_is_what_makes_the_answer_right(valley_surface, y):
-    """PLAN §2 Step 3, measured rather than asserted.
+    """Step 3, measured rather than asserted.
 
     Without it the same pipeline on the same surface loses fourteen grid rows instead of
     one. This is the number that justifies the step in the report.
@@ -199,7 +199,7 @@ def test_smoothing_is_what_makes_the_answer_right(valley_surface, y):
 
 
 def test_the_unsmoothed_failure_is_the_worst_at_the_top_of_the_valley(valley_surface):
-    """PLAN §3 names Y=750 as the worst case at -12.79%. The mechanism is that hillslope
+    """names Y=750 as the worst case at -12.79%. The mechanism is that hillslope
     water runs *along* a flat stair-step band and rejoins the channel below the outlet, so
     the smaller the catchment the larger the share it loses."""
     errors = {
@@ -251,7 +251,7 @@ def test_the_valley_is_nowhere_near_the_sample_sheet(valley_contours, sample_con
 
 @pytest.mark.parametrize("quadrant", ["SW", "SE", "NW", "NE"])
 def test_a_quadrant_of_the_sample_is_analysed_on_its_own_terms(sample_contours, quadrant):
-    """PLAN §5.3. Clip the sheet to one quadrant, re-run everything, and check the answers
+    """Clip the sheet to one quadrant, re-run everything, and check the answers
     describe *that* quadrant.
 
     A result that came from a hard-coded coordinate, a memorised resolution or a cached
@@ -311,7 +311,7 @@ def test_the_quadrants_give_four_different_answers(sample_contours):
      "with_labels_folder", "stray_3d_polygon", "kmz"],
 )
 def test_every_structural_variant_survives_the_whole_pipeline(name):
-    """The Phase 1 fixtures, carried all the way to a catchment. Parsing a file is not the
+    """The parser fixtures, carried all the way to a catchment. Parsing a file is not the
     same as being able to analyse it: a variant that produced subtly different geometry
     would parse cleanly and then fall over in the triangulation or the routing.
     """

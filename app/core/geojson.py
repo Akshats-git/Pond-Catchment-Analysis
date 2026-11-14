@@ -14,7 +14,7 @@ holes clockwise, which is what RFC 7946 asks for.
 of them on the sample's largest basin, which no browser wants. Douglas-Peucker in
 projected metres removes the staircase. The tolerance is kept below one cell on purpose:
 under that, a moved vertex cannot cross into a neighbouring cell, so the area the ring
-encloses is preserved to a fraction of a percent (PLAN Phase 8). If the ring is still too
+encloses is preserved to a fraction of a percent. If the ring is still too
 large for the vertex budget the tolerance is doubled until it fits, and the response says
 so rather than silently shipping a different shape.
 

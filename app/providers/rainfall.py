@@ -2,7 +2,7 @@
 
 The runoff calculation needs a *daily* rainfall series, not an annual total. SCS-CN is an
 event model, and applying it to a year's rain in one lump overestimates runoff about six
-times over (PLAN §4).
+times over.
 
 Two providers sit behind one interface. `OpenMeteoRainfallProvider` fetches ten years of
 daily records for the site from Open-Meteo, which is free, needs no key and covers any
@@ -109,7 +109,7 @@ class RainfallSeries:
 
 
 class RainfallProvider(ABC):
-    """The seam a real feed plugs into (PLAN §8).
+    """The seam a real feed plugs into.
 
     Takes a location because real rainfall depends on one. The fallback implementation
     ignores it and says so, rather than pretending the sample sheet's climate is

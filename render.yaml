@@ -1,7 +1,7 @@
 # Render Blueprint: one free, self-contained web service.
 #
 # No POND_JOBS_WORKERS / POND_CV_SERVICE_URL: the container analyzes and does its own
-# imagery work in-process (see docs/INSTALL.md), so the 5-container docker-compose.yml
+# imagery work in-process , so the 5-container docker-compose.yml
 # fleet isn't needed for a public demo.
 #
 # Free plan has no persistent disk: .data/ponds.sqlite3 (saved analyses) and .cache/

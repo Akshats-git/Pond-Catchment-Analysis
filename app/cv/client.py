@@ -2,8 +2,8 @@
 
 In-process by default; over HTTP when `POND_CV_SERVICE_URL` names a separate CV service.
 Either way the answer is a boolean grid on the analysis DEM, handed to the siting step as
-its exclusion mask (`PondSiteSelector.available_mask`), which has been waiting for exactly
-this since Phase 2.
+its exclusion mask (`PondSiteSelector.available_mask`), which was built for exactly
+this.
 """
 
 from __future__ import annotations

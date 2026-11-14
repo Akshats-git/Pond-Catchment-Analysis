@@ -1,7 +1,7 @@
 """Async jobs, the result cache, and the dispatcher that spreads them over workers.
 
 `POST /jobs` returns at once with an id; `GET /jobs/{id}` says where the analysis is. Two
-reasons for it, one from the HLD and one from the user. Heavy work should not hold an HTTP
+reasons for it. Heavy work should not hold an HTTP
 connection open for its whole duration; and a progress bar that reports the stage the
 analysis is actually in (fetching tiles, routing flow, siting, runoff) is what makes a
 several-second wait feel like work rather than a hang.
@@ -13,10 +13,10 @@ and hands each job to a worker over HTTP by calling that worker's own job API, m
 its stage and progress back to whoever is polling. Same code, same endpoints, so a worker
 can be tested alone and the gateway adds nothing but the dispatch.
 
-**Two dispatch strategies, measured rather than assumed** (PLAN3 §6.2). Each worker runs
+**Two dispatch strategies, measured rather than assumed**. Each worker runs
 one analysis at a time, because two at once on 512 MB kill both. `round_robin` hands jobs
 out in turn whether or not the next worker is busy; `least_busy` hands each job to a
-worker with a free slot and queues only when none has one. docs/SCALING.md has the
+worker with a free slot and queues only when none has one. The load tests have the
 numbers.
 """
 

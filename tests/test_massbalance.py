@@ -1,4 +1,4 @@
-"""Phase 5 Test B. Mass balance.
+"""Mass balance.
 
 The cheapest possible check on a flow network, and the strictest. Every cell drains to
 exactly one outlet, so the basins tile the map: their areas must sum to the mapped area,
@@ -23,7 +23,7 @@ from tests.fixtures import make_variants as mv
 from tests.fixtures.make_synthetic import VALLEY
 
 SAMPLE = "data/contours_1m.kml"
-TOLERANCE = 1e-4  # PLAN §3 Test B: better than 0.01%
+TOLERANCE = 1e-4  # Test B: better than 0.01%
 
 
 def basin_areas(flow, dem) -> np.ndarray:
@@ -38,7 +38,7 @@ def basin_areas(flow, dem) -> np.ndarray:
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("resolution", [5.0, 3.5, 2.5])
 def test_basins_tile_the_sample_sheet(sample_surface, resolution):
-    """PLAN §3 Test B, at each of the ensemble's grids."""
+    """Test B, at each of the ensemble's grids."""
     dem = sample_surface.sample(resolution)
     flow = analyse_terrain(dem)
     assert basin_areas(flow, dem).sum() == pytest.approx(

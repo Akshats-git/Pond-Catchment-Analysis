@@ -4,7 +4,7 @@ Kept deliberately thin. Everything a request touches lives one layer down.
 `routers/analyze.py` holds the HTTP surface, `pipeline.py` the wiring, `core/` the
 analysis. So this file is the place to see what the service is, not how it works.
 
-`/docs` is not decoration: the assignment's rubric asks for API documentation, and an
+`/docs` is not decoration: an
 OpenAPI schema generated from the same models that serialise the response cannot drift
 from what the endpoint actually returns.
 """
@@ -36,7 +36,7 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 """The demo page, resolved from this file rather than the working directory: the
 container runs uvicorn from wherever its entrypoint lands, and a page that only appears
 when the server happens to start in the repo root is a page that is missing in
-production (PLAN Phase 11)."""
+production."""
 
 DESCRIPTION = """
 Send a contour map as KML or KMZ. Get back a village pond site, the ground that drains
@@ -76,10 +76,9 @@ Errors always come back as `{"status": "error", "code", "detail", "hint"}`.
 def _hide_upload_alias(schema: dict) -> dict:
     """Drop the back-compatible upload field from the generated schema.
 
-    The routes accept the contour file under `contour_map` (the name the brief fixes)
+    The routes accept the contour file under `contour_map` 
     and under `file` (the name this service used first). Only the first is advertised:
-    `/docs` should offer one file picker, and a grader reading it should see exactly the
-    field the brief told them to send.
+    `/docs` should offer one file picker, under one clear field name.
 
     This is what `File(..., include_in_schema=False)` would do, except that FastAPI
     honours that flag for query and path parameters and ignores it for form fields, so
@@ -177,7 +176,7 @@ def create_app() -> FastAPI:
         """
         index = STATIC_DIR / "index.html"
         if index.is_file():
-            # No-store rather than a cache buster: the page is small, and a grader
+            # No-store rather than a cache buster: the page is small, and someone
             # reloading after a redeploy should never be served yesterday's build.
             return FileResponse(index, headers={"Cache-Control": "no-store"})
         return RedirectResponse(settings.api.docs_url)

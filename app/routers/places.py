@@ -1,4 +1,4 @@
-"""Place search, proxied to Nominatim (the HLD's `GET /api/villages`).
+"""Place search, proxied to Nominatim.
 
 Proxied rather than called from the browser for three reasons: one cache serves every
 user, the service sends the identifying User-Agent Nominatim's policy asks for, and the
@@ -60,7 +60,7 @@ def search(query: str) -> list[dict]:
             with urllib.request.urlopen(request, timeout=cfg.timeout_s) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except (urllib.error.URLError, OSError, ValueError) as exc:
-            # One retry: the lab's own link resets for a few seconds at a time, and giving
+            # One retry: a link can reset for a few seconds at a time, and giving
             # up on the first attempt turned that blip into a failed search every time.
             time.sleep(cfg.retry_delay_s)
             try:

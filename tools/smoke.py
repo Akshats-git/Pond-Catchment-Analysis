@@ -1,7 +1,7 @@
 """Every endpoint of a running service, once, with the answer checked: a deployment check.
 
-    python -m tools.smoke --url http://localhost:5000        # on sys1, against the gateway
-    python -m tools.smoke --url http://localhost:5229        # the compose stack
+    python -m tools.smoke --url http://localhost:5000        # a single process or the gateway
+    python -m tools.smoke --url http://localhost:8080        # the compose stack
 
 Uses the real network where the endpoint does (Open-Meteo, Nominatim, Esri imagery), so a
 failure there is reported as that endpoint's failure, not hidden. Prints one line per check
@@ -79,7 +79,7 @@ def main() -> int:
 
     def page():
         text = expect(s.get("/")).text
-        assert "<html" in text.lower() and "Try the sample" in text, "not the Phase 3 page"
+        assert "<html" in text.lower() and "Try the sample" in text, "not the demo page"
         return f"{len(text) // 1024} KB"
 
     def area():
