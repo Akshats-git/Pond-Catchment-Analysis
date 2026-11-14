@@ -54,7 +54,7 @@ services:
 
   # Not part of the 512 MB envelope: this is the observability tooling, not the app.
   otel:
-    image: grafana/otel-lgtm:latest
+    image: grafana/otel-lgtm:0.41.0
     restart: unless-stopped
     ports: ["3000:3000"]
     volumes: ["otel-data:/data"]

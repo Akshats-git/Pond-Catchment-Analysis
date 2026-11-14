@@ -25,6 +25,10 @@ EXPOSE 5000
 ENV POND_API_DEFAULT_ENSEMBLE=false \
     POND_API_ALLOW_ENSEMBLE=false \
     POND_STORE_PATH=/data/ponds.sqlite3
+# glibc gives each threadpool thread its own malloc arena and rarely hands freed NumPy
+# buffers back, so a busy CV service sat at 190-355 MB idle and was OOM-killed at 512 MB
+# by the next pair of imagery requests. Two arenas keep it at 110-145 MB.
+ENV MALLOC_ARENA_MAX=2
 
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
   CMD python -c "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '5000') + '/health', timeout=2)" || exit 1

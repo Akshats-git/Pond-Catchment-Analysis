@@ -155,3 +155,47 @@ def test_the_analysis_keeps_off_unavailable_land(monkeypatch):
     assert response.status_code == 422
     assert response.json()["code"] == "no_site_in_selection"
     assert "available land" in response.json()["detail"]
+
+
+def test_concurrent_classifications_are_capped():
+    """Six requests at once never run more than `max_concurrent` classifications side by
+    side: on a 512 MB container three large pairs at once got the CV service OOM-killed."""
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.cv import service
+
+    guard = threading.Lock()
+    inner = fetcher()
+
+    def slow_fetch(z, x, y):  # slow enough that the six requests overlap
+        time.sleep(0.01)
+        return inner(z, x, y)
+
+    calls, active = [], [0]
+
+    def tracked(fn):
+        def run(*args, **kwargs):
+            with guard:
+                active[0] += 1
+                calls.append(active[0])
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                with guard:
+                    active[0] -= 1
+        return run
+
+    aoi = AreaOfInterest.from_bbox(BBOX)
+    original = service.classes_for_area
+    service.classes_for_area = tracked(original)
+    try:
+        with ThreadPoolExecutor(6) as pool:
+            jobs = [pool.submit(fn, aoi, fetch=slow_fetch)
+                    for fn in (detect_ponds, land_availability) * 3]
+            for job in jobs:
+                assert job.result()["status"] == "ok"
+    finally:
+        service.classes_for_area = original
+    assert max(calls) <= settings.cv.max_concurrent

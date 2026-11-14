@@ -8,7 +8,9 @@ swapped for a trained model, without the terrain code noticing.
 
 from __future__ import annotations
 
+import functools
 import io
+import threading
 import time
 from dataclasses import replace
 
@@ -39,6 +41,18 @@ STYLE = {
 }
 _MAX_PONDS = 300
 
+# Each classification holds up to ~200 MB of imagery and masks; this caps how many do
+# at once so concurrent requests queue instead of pushing the process past its memory.
+_slots = threading.BoundedSemaphore(max(1, settings.cv.max_concurrent))
+
+
+def _limited(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with _slots:
+            return fn(*args, **kwargs)
+    return wrapper
+
 
 def _classes(aoi: AreaOfInterest, fetch=None) -> tuple[LandClasses, np.ndarray]:
     land = classes_for_area(aoi.bbox, fetch=fetch)
@@ -54,6 +68,7 @@ def _component_geometry(mask: np.ndarray, frame, r0: int, c0: int) -> dict:
     return geometry
 
 
+@_limited
 def detect_ponds(aoi: AreaOfInterest, *, fetch=None) -> dict:
     """Existing water bodies inside the selection, one feature each, largest first."""
     started = time.perf_counter()
@@ -102,6 +117,7 @@ def detect_ponds(aoi: AreaOfInterest, *, fetch=None) -> dict:
     }
 
 
+@_limited
 def land_availability(aoi: AreaOfInterest, *, fetch=None) -> dict:
     """Ground that is water, built on, or under trees, and the share of the rest."""
     started = time.perf_counter()
@@ -145,6 +161,7 @@ def land_availability(aoi: AreaOfInterest, *, fetch=None) -> dict:
     }
 
 
+@_limited
 def land_classes_png(bbox, *, fetch=None) -> tuple[bytes, dict]:
     """The class grid as a lossless PNG plus the frame to place it, for a remote client."""
     land = classes_for_area(tuple(bbox), fetch=fetch)

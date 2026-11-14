@@ -20,7 +20,8 @@ it, and how much water it'll hold in an average year — all overlaid on the map
   imagery) existing ponds and buildable land, all on the map. Export as GeoJSON or PNG,
   save an analysis, reopen it later.
 
-A sample area near Raipur, Chhattisgarh is one click away and resolves in about half a second.
+A sample area near Raipur, Chhattisgarh is one click away. It resolves in about half a
+second on a laptop, and in a few seconds on the free-tier live demo.
 
 | Rainfall and runoff | Imagery layers | On a phone |
 |---|---|---|
@@ -113,7 +114,7 @@ pip install -r requirements.txt
 pytest
 ```
 
-590 tests, no network required. Elevation and rainfall are stubbed with known
+591 tests, no network required. Elevation and rainfall are stubbed with known
 answers, so a run reproduces the same result every time.
 
 ## Documentation

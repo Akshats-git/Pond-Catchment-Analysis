@@ -36,7 +36,7 @@ curl -X POST localhost:8000/api/v1/analyzeArea -H 'Content-Type: application/jso
 curl -F contour_map=@data/contours_1m.kml localhost:8000/api/v1/analyzeContour
 ```
 
-Tests: `pip install pytest` then `pytest` (590 tests, about three minutes, no network).
+Tests: `pip install pytest` then `pytest` (591 tests, about three minutes, no network).
 
 ## 2. docker compose
 
@@ -91,6 +91,11 @@ Telemetry only runs when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Compose sets it. 
 (one process, the tests, the Render deploy) nothing is sent. To turn it off in compose,
 delete that line from `docker-compose.yml`. The `otel` image is about 2.7 GB and is not
 part of the 512 MB limit.
+
+If `otel` stays `unhealthy` after its image version changes, the `otel-data` volume was
+written by the older release (its profiling store is not forward-compatible). Reset it
+with `docker compose rm -sf otel && docker volume rm pondcatchmentanalysis_otel-data`,
+then `docker compose up -d otel`; only past telemetry is lost.
 
 `python -m tools.scaling` runs the stress matrix against this stack and rewrites
 [SCALING.md](SCALING.md). `docker compose down` stops it; add `-v` to also delete the

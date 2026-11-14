@@ -540,7 +540,12 @@ class CVConfig:
     min_imagery_zoom: int = 13
     max_pixels: int = 3_000_000
     """Imagery pixels read at once. A bigger area is read at a coarser zoom rather than
-    refused; this is what bounds the CV's memory at about 150 MB on a 512 MB container."""
+    refused; this is what bounds one classification at about 200 MB of working memory."""
+    max_concurrent: int = 1
+    """Classifications run at once; more wait their turn. `max_pixels` bounds one, this
+    bounds the sum. The page asks for water and land together, and on a 512 MB container
+    two at once (~85 MB base + 2 x 200 MB) got the CV service OOM-killed. Raise it only
+    with the memory to match."""
     water_min_area_m2: float = 1500.0
     """Smaller smooth dark blobs are flooded paddy, shadow or a tank, not a pond. The
     smallest real pond on the sample area is about 2,400 m2; paddy specks are ~500 m2."""
