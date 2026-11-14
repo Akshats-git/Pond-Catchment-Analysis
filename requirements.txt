@@ -16,5 +16,5 @@ opentelemetry-instrumentation-fastapi==0.51b0
 opentelemetry-instrumentation-httpx==0.51b0
 opentelemetry-instrumentation-urllib==0.51b0
 
-# Development / validation (Phase 5)
+# Development
 pytest==8.3.4

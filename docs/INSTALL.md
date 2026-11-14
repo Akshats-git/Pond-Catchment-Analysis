@@ -6,7 +6,7 @@ Three ways to run the service, from the smallest to the whole system.
 |---|---|---|
 | [1. One process](#1-one-process) | Everything in one uvicorn: page, API, jobs, CV, saved sites | Python 3.12 |
 | [2. docker compose](#2-docker-compose) | Frontend, gateway, three workers, CV service, database volume; each capped at 512 MB | Docker |
-| [3. The lab's four containers](#3-the-labs-four-containers) | Gateway on sys1, workers on sys2-4 | ssh to 10.1.75.53 |
+| [3. Four separate hosts](#3-four-separate-hosts) | Gateway on one host, a worker on each of the other three | ssh to the hosts |
 
 The demo region around the sample sheet (81.18-81.42 E, 21.13-21.37 N) works in all three
 **with no internet at all**: its elevation tiles are committed in `data/tiles/`. Anywhere
@@ -36,7 +36,7 @@ curl -X POST localhost:8000/api/v1/analyzeArea -H 'Content-Type: application/jso
 curl -F contour_map=@data/contours_1m.kml localhost:8000/api/v1/analyzeContour
 ```
 
-Tests: `pip install pytest` then `pytest` (588 tests, about three minutes, no network).
+Tests: `pip install pytest` then `pytest` (590 tests, about three minutes, no network).
 
 ## 2. docker compose
 
@@ -64,7 +64,7 @@ stack described below):
                      └────────────┘
 ```
 
-Every service is capped at 512 MB, the lab containers' limit. Useful knobs, as
+Every service is capped at 512 MB, the limit of the containers it was first deployed on. Useful knobs, as
 environment variables when running `docker compose up`:
 
 ```bash
@@ -96,7 +96,7 @@ part of the 512 MB limit.
 [SCALING.md](SCALING.md). `docker compose down` stops it; add `-v` to also delete the
 saved-sites database and the tile caches.
 
-## 3. The lab's four containers
+## 3. Four separate hosts
 
 ```bash
 deploy/deploy.sh            # all four: code, venv, restart in role
@@ -105,18 +105,19 @@ deploy/status.sh            # health and real memory use of each
 deploy/start-lb.sh          # optional: the Go balancer on sys1:6000, round-robin over the workers
 ```
 
-| Host | ssh | Role | URL |
-|---|---|---|---|
-| sys1 | 2229 | gateway: page, jobs, dispatch, saved sites | http://10.1.75.53:5229 |
-| sys2 | 2230 | worker | 172.17.0.31:5000 (bridge) |
-| sys3 | 2231 | worker | 172.17.0.32:5000 |
-| sys4 | 2232 | worker | 172.17.0.33:5000 |
+| Host | Role | Port |
+|---|---|---|
+| sys1 | gateway: page, jobs, dispatch, saved sites | 5229 |
+| sys2-4 | worker | 5000, on the private bridge |
+
+Host addresses and ssh ports live in `deploy/hosts.sh` and can be overridden from the
+environment.
 
 The same `run.sh` runs everywhere; `deploy.sh` writes each host's `.env.role`, and on sys1
 that sets `POND_JOBS_WORKERS` to the three workers' bridge addresses. Workers use port
-5000 and nothing else: 4000 on sys2-4 is someone's chat app and 3000 on sys1 the lab's own
-balancer. sys2-4 have no numpy and no `python3-venv`, so the venv is bootstrapped with
-`get-pip.py`, which `deploy.sh` does on first run.
+5000 because the other ports on those shared hosts were taken. sys2-4 have no numpy and
+no `python3-venv`, so the venv is bootstrapped with `get-pip.py`, which `deploy.sh` does
+on first run.
 
 Two things learned the hard way, both in the scripts:
 
@@ -127,7 +128,7 @@ Two things learned the hard way, both in the scripts:
 
 ## Configuration
 
-Every setting in `app/config.py` is overridable as `POND_<GROUP>_<FIELD>`. The Phase 3 ones:
+Every setting in `app/config.py` is overridable as `POND_<GROUP>_<FIELD>`. The ones you are most likely to change:
 
 ```bash
 POND_ELEVATION_NETWORK_ENABLED=false   # tiles from disk only (tests; an offline demo)

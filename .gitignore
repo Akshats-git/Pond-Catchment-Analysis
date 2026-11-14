@@ -12,9 +12,6 @@ env/
 # Numeric caches / generated artefacts
 *.npy
 *.npz
-# docs/figures/ is NOT ignored: those four PNGs are figures in REPORT.md, and a report
-# whose images only exist on the machine that generated them is a broken report.
-# Regenerate them with `python docs/make_figures.py`.
 
 # Runtime logs from run.sh
 server.log
@@ -25,19 +22,16 @@ pytest.log
 .idea/
 .DS_Store
 
-# LaTeX build artefacts (docs/report/*.tex is the source of truth)
+# LaTeX build artefacts
 *.aux
 *.log
 *.out
 *.toc
 
-references/
+# Local only: reports, working notes and reference material
+private/
 
-# Working notes, kept local
-PLAN.md
-REPORT.md
-
-# Phase 3 runtime state: fetched elevation tiles and the saved-analyses database.
+# Runtime state: fetched elevation tiles and the saved-analyses database.
 # data/tiles/ (the committed demo-region seed) is NOT ignored.
 .cache/
 .data/

@@ -1,12 +1,12 @@
 # API reference
 
-Base URL of the running service: **`http://10.1.75.53:5229`**
+Base URL when running with `docker compose up`: **`http://localhost:5229`**
+(or the [live demo](https://pond-catchment-analysis-vt7g.onrender.com)).
 Interactive documentation, generated from the same models that serialise the responses:
-**`http://10.1.75.53:5229/docs`**
+**`http://localhost:5229/docs`**
 
 Two ways in, one answer out. Draw an area on a map and the heights come from free SRTM
-elevation tiles (Phase 3); upload a surveyed contour sheet and they come from the sheet
-(Phase 2). Both return **the same response schema**, so a client renders either the same
+elevation tiles; upload a surveyed contour sheet and they come from the sheet. Both return **the same response schema**, so a client renders either the same
 way. The map path takes JSON; the sheet path takes `multipart/form-data`. Everything
 answers JSON except `/renderMap`, which returns a PNG.
 
@@ -90,7 +90,7 @@ trunk threshold). These are the channels a pond could sit on and the ones it had
 clear of.
 
 ```bash
-curl -X POST http://10.1.75.53:5229/api/v1/analyzeArea \
+curl -X POST http://localhost:5229/api/v1/analyzeArea \
      -H 'Content-Type: application/json' \
      -d '{"bbox": [81.2814, 21.2398, 81.3126, 21.2636]}'
 ```
@@ -193,7 +193,7 @@ that ground delivers in an average year.
 
 `multipart/form-data`. Only `contour_map` is required; every other field has a derived
 or configured default, and the defaults are what the sample run in
-[the Phase 2 report](report/phase2_report.pdf) used.
+[METHODOLOGY.md](METHODOLOGY.md) used.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
@@ -212,7 +212,7 @@ or configured default, and the defaults are what the sample run in
 > ensemble peaks at 581 MB, so it is switched off here — `POND_API_DEFAULT_ENSEMBLE=false`
 > for the default, and `POND_API_ALLOW_ENSEMBLE=false` so that an explicit `ensemble=true`
 > comes back as a `422 ensemble_unavailable` rather than being attempted. Off the
-> container both default to on. See [the Phase 2 report, §7](report/phase2_report.pdf).
+> container both default to on. See [METHODOLOGY.md, §5 Test C](METHODOLOGY.md#test-c-the-resolution-ensemble).
 
 ### Response, 200
 
@@ -278,22 +278,22 @@ style them without guessing, and the alternates' ponds and markers come in a pal
 ```bash
 # Simplest possible call: the file, and nothing else.
 curl -F contour_map=@data/contours_1m.kml \
-     http://10.1.75.53:5229/api/v1/analyzeContour
+     http://localhost:5229/api/v1/analyzeContour
 
 # Your own rain gauge, a coarser grid, and five sites instead of three.
 curl -F contour_map=@data/contours_1m.kml \
      -F rainfall_mm=1200 -F rain_days=55 \
      -F grid_resolution=5 -F top_n=5 \
-     http://10.1.75.53:5229/api/v1/analyzeContour
+     http://localhost:5229/api/v1/analyzeContour
 
 # A pour point you have already chosen: no site search, just that catchment.
 curl -F contour_map=@data/contours_1m.kml \
      -F lat=21.243922 -F lon=81.289998 \
-     http://10.1.75.53:5229/api/v1/analyzeContour
+     http://localhost:5229/api/v1/analyzeContour
 
 # Just the headline numbers.
 curl -sF contour_map=@data/contours_1m.kml \
-     http://10.1.75.53:5229/api/v1/analyzeContour \
+     http://localhost:5229/api/v1/analyzeContour \
   | python3 -c 'import json,sys; s=json.load(sys.stdin)["recommended_site"]; \
 print(s["location"], s["catchment"]["area_ha"], "ha", s["runoff"]["annual_runoff_m3"], "m3/yr")'
 ```
@@ -375,16 +375,16 @@ Two things adapt to the image rather than being fixed:
 ```bash
 # The default picture: satellite, contours, legend, whole sheet.
 curl -X POST -F "contour_map=@data/contours_1m.kml" -F "ensemble=false" \
-     http://10.1.75.53:5229/api/v1/renderMap -o catchment.png
+     http://localhost:5229/api/v1/renderMap -o catchment.png
 
 # Zoomed to the answer, no imagery, larger.
 curl -X POST -F "contour_map=@data/contours_1m.kml" -F "ensemble=false" \
      -F "frame=sites" -F "basemap=hillshade" -F "width=1600" -F "height=1200" \
-     http://10.1.75.53:5229/api/v1/renderMap -o catchment.png
+     http://localhost:5229/api/v1/renderMap -o catchment.png
 
 # The picture and the caveats that go with it.
 curl -sD - -o catchment.png -X POST -F "contour_map=@data/contours_1m.kml" \
-     -F "ensemble=false" http://10.1.75.53:5229/api/v1/renderMap \
+     -F "ensemble=false" http://localhost:5229/api/v1/renderMap \
   | grep -i x-pond-warnings
 ```
 
@@ -478,15 +478,15 @@ service thins further, reports the tolerance it settled on, and says so in `warn
 ```bash
 # The overlay, at the default thinning.
 curl -X POST -F "contour_map=@data/contours_1m.kml" \
-     http://10.1.75.53:5229/api/v1/contours -o contours.geojson
+     http://localhost:5229/api/v1/contours -o contours.geojson
 
 # Every vertex in the file, nothing dropped.
 curl -X POST -F "contour_map=@data/contours_1m.kml" -F "simplify_m=0" \
-     http://10.1.75.53:5229/api/v1/contours
+     http://localhost:5229/api/v1/contours
 
 # Just the shape of the answer.
 curl -s -X POST -F "contour_map=@data/contours_1m.kml" \
-     http://10.1.75.53:5229/api/v1/contours \
+     http://localhost:5229/api/v1/contours \
   | python3 -c 'import json,sys; b=json.load(sys.stdin); \
 print(b["contour_count"], "lines,", b["level_count"], "levels,", b["vertex_count"], "points")'
 ```
@@ -506,7 +506,7 @@ the middle of the sheet as soon as a file is read.
 | `lon` | float | yes | −180 to 180 |
 
 ```bash
-curl "http://10.1.75.53:5229/api/v1/rainfall?lat=21.25&lon=81.63"
+curl "http://localhost:5229/api/v1/rainfall?lat=21.25&lon=81.63"
 ```
 
 ```json
@@ -538,7 +538,7 @@ documented regional climatology instead, `is_measured` false, and the reason in
 ## GET /health
 
 ```bash
-curl http://10.1.75.53:5229/health
+curl http://localhost:5229/health
 # {"status":"ok","service":"Pond Catchment Analysis API","version":"2.0.0",
 #  "ensemble_available":false,"ensemble_default":false,
 #  "role":"gateway","workers":3,"max_aoi_area_km2":100.0,"min_aoi_area_ha":2.0}
@@ -604,7 +604,7 @@ file has to change.
 | `no_buildable_ground` | Nothing on the sheet is flat enough to build on |
 | `no_ground_clear_of_watercourse` | Every candidate stands in or too near a watercourse |
 | `no_site_found` | The search finished with nothing that satisfies every rule |
-| `no_available_ground` | An `exclusion_mask` ruled out every site the terrain allows. Library callers only; see [the Phase 2 report, §8](report/phase2_report.pdf) |
+| `no_available_ground` | An `exclusion_mask` ruled out every site the terrain allows. Library callers only; see [METHODOLOGY.md, §8](METHODOLOGY.md#8-the-map-path-an-area-instead-of-a-sheet) |
 | `exclusion_mask_shape` | An `exclusion_mask` was not built on the analysis grid. Library callers only |
 | `ensemble_unavailable` | `ensemble=true` on a host without the memory for it (this deployment) |
 | `invalid_simplify` | `/contours` asked for a tolerance outside 0–1000 m |

@@ -1,6 +1,6 @@
 """Phase 17. The SRTM path validated against the 1 m contour survey.
 
-`docs/validate_two_path.py` produces the published table (docs/VALIDATION.md). These tests
+`tools/validate_two_path.py` produces the published table (docs/VALIDATION.md). These tests
 pin its findings, so a change that makes the free-data path disagree with the survey fails
 here rather than quietly changing a number in a document.
 """
@@ -13,7 +13,7 @@ import pytest
 
 from app.pipeline import analyse
 from app.schemas.requests import AnalysisParams
-from docs import validate_two_path as v
+from tools import validate_two_path as v
 
 
 @pytest.fixture(scope="module")

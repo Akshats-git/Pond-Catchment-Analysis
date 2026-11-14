@@ -1,9 +1,8 @@
 # Methodology
 
 How a contour map, or an area drawn on a map, becomes a catchment area, where the pond
-goes, and what the evidence is that the numbers are right. §1-7 are the analysis itself
-(Phase 2); §8 is how a drawn area feeds it from elevation tiles, and §9 the imagery
-layers (Phase 3).
+goes, and what the evidence is that the numbers are right. §1-7 are the analysis itself;
+§8 is how a drawn area feeds it from elevation tiles, and §9 the imagery layers.
 
 Every figure below is produced by the test suite and not transcribed into it. Regenerate
 with `pytest tests/test_catchment_analytic.py tests/test_massbalance.py`.
@@ -404,7 +403,7 @@ interpolation cannot recover detail the contours never recorded, and near contou
 it produces flat triangles. See Table 1's residual.
 
 **Land cover is read from imagery, roughly.** The watercourse rule keeps a site out of the
-river. Since Phase 3 the imagery layer (§9) can keep it off existing water, buildings and
+river. The imagery layer (§9) can keep it off existing water, buildings and
 tree cover too (`avoid_unavailable_land`), but that is a colour-and-texture screen, not
 a cadastral record: it cannot know who owns a field.
 
@@ -426,7 +425,7 @@ the ground. The capacity at the requested depth is monotone, and is the figure t
 
 ## 8. The map path: an area instead of a sheet
 
-Phase 3 lets a user draw an area on the map. Everything in §1-7 from the DEM onward is
+A user can also draw an area on the map. Everything in §1-7 from the DEM onward is
 unchanged: `RasterSurface` (`app/core/raster_dem.py`) builds the same `DEM` object
 `ContourSurface` builds, and no module downstream of it was edited to accept it. That is
 the claim PLAN §8 made about the design, now tested rather than asserted.
@@ -452,11 +451,11 @@ landscape. If the DEM stopped at it, every catchment reaching the line would be 
 and every volume understated, plausibly and silently. The DEM covers the selection grown
 by 25% of its span on each side (at least 300 m); flow is routed over all of it; the
 siting step receives everything outside the selection as excluded ground, through the
-`exclusion_mask` that has been in `PondSiteSelector` since Phase 2. A polygon is a siting
+`exclusion_mask` that `PondSiteSelector` already had. A polygon is a siting
 mask, never a DEM mask, for the same reason.
 
 **Adaptive resolution.** `resolution = max(tile pixel, sqrt(analysed area / 1,000,000))`.
-A million cells is the envelope the Phase 2 sheet (886,000 cells, ~300 MB) proved fits a
+A million cells is the envelope the survey sheet (886,000 cells, ~300 MB) proved fits a
 512 MB container. Past 100 km² of selection the request is refused with a named 422.
 
 **Smoothing the whole-metre staircase.** SRTM heights are integers, so gentle farmland is a
